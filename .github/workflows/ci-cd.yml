@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
@@ -10,202 +10,53 @@ on:
       - main
       - develop
 
+permissions:
+  contents: read
+
 env:
-  NODE_VERSION: '18'
+  NODE_VERSION: '20'
   WORKING_DIRECTORY: './frontend'
+  EXPO_PUBLIC_BACKEND_URL: 'https://bookscrubby.com'
+  EXPO_PUBLIC_IMAGES_URL: 'https://bookscrubby.com'
 
 jobs:
-  # Job 1: Install dependencies and lint code
-  lint:
-    name: Lint & Code Quality
+  validate:
+    name: Validate frontend
     runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/yarn.lock
-      
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-      
-      - name: Run ESLint
-        run: yarn run lint 2>/dev/null || echo "Note: Lint script not configured yet"
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-        continue-on-error: true
 
-  # Job 2: Run tests
-  test:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    needs: lint
-    
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/yarn.lock
-      
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-      
-      - name: Run tests
-        run: yarn test --coverage --watchAll=false 2>/dev/null || echo "Note: Tests may not be configured yet"
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-        continue-on-error: true
-      
-      - name: Upload coverage reports
-        if: always()
-        uses: codecov/codecov-action@v3
-        with:
-          files: ${{ env.WORKING_DIRECTORY }}/coverage/coverage-final.json
-          flags: unittests
-          fail_ci_if_error: false
-        continue-on-error: true
 
-  # Job 3: Build the application
-  build:
-    name: Build Application
-    runs-on: ubuntu-latest
-    needs: test
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
+          cache: yarn
           cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/yarn.lock
-      
+
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
         working-directory: ${{ env.WORKING_DIRECTORY }}
-      
-      - name: Build application
-        run: yarn build
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-        env:
-          CI: false
-      
-      - name: Check build output
         run: |
-          if [ -d "build" ]; then
-            echo "✓ Build directory created successfully"
-            ls -lah build/ | head -20
-          else
-            echo "✗ Build directory not found"
-            exit 1
-          fi
+          corepack enable
+          yarn install --frozen-lockfile
+
+      - name: Check Expo configuration
         working-directory: ${{ env.WORKING_DIRECTORY }}
-      
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v3
+        run: npx expo-doctor
+
+      - name: Run ESLint
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: yarn lint
+        continue-on-error: true
+
+      - name: Export web application
+        working-directory: ${{ env.WORKING_DIRECTORY }}
+        run: yarn build
+
+      - name: Upload web export
+        uses: actions/upload-artifact@v4
         with:
-          name: build-artifacts
+          name: book-scrubby-web
           path: ${{ env.WORKING_DIRECTORY }}/build
           retention-days: 7
-
-  # Job 4: Security scanning (optional but recommended)
-  security:
-    name: Security Checks
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'yarn'
-          cache-dependency-path: ${{ env.WORKING_DIRECTORY }}/yarn.lock
-      
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-      
-      - name: Check for vulnerable dependencies
-        run: yarn audit --level moderate 2>/dev/null || echo "⚠ Some vulnerabilities found. Review and update dependencies."
-        working-directory: ${{ env.WORKING_DIRECTORY }}
-        continue-on-error: true
-      
-      - name: Run Snyk security scan (optional)
-        uses: snyk/actions/node@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high
-          command: test
-        continue-on-error: true
-        if: ${{ secrets.SNYK_TOKEN != '' }}
-
-  # Job 5: Deploy to Vercel (optional - configure with your settings)
-  deploy:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Download build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: build-artifacts
-          path: ${{ env.WORKING_DIRECTORY }}/build
-      
-      - name: Deploy to Vercel
-        uses: vercel/action@v4
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: ${{ env.WORKING_DIRECTORY }}
-        if: ${{ secrets.VERCEL_TOKEN != '' }}
-        continue-on-error: true
-      
-      - name: Deployment Status
-        if: always()
-        run: |
-          echo "Deployment workflow completed"
-          echo "To enable deployment, configure Vercel secrets in repository settings"
-
-  # Job 6: Create summary report
-  summary:
-    name: Workflow Summary
-    runs-on: ubuntu-latest
-    needs: [lint, test, build, security]
-    if: always()
-    
-    steps:
-      - name: Generate summary
-        run: |
-          echo "## 🔍 CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Security | ${{ needs.security.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
