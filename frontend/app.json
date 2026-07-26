@@ -10,8 +10,6 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0A0611",
     "primaryColor": "#8B2FC9",
-    "privacy": "public",
-    "githubUrl": "https://bookscrubby.com",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bookscrubby",
