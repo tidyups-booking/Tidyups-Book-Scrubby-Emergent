@@ -56,4 +56,8 @@ jobs:
 
       - name: Build and submit iOS app
         working-directory: frontend
+        env:
+          EXPO_ASC_API_KEY_PATH: ./AuthKey_676XW385F6.p8
+          EXPO_ASC_KEY_ID: 676XW385F6
+          EXPO_ASC_ISSUER_ID: 207e2f58-9fab-4c4a-a87c-d292a1c2aaaa
         run: eas build --platform ios --profile production --auto-submit --non-interactive --wait
