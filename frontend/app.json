@@ -69,6 +69,7 @@
       "privacyPolicyUrl": "https://bookscrubby.com/privacy",
       "termsOfServiceUrl": "https://bookscrubby.com/terms",
       "supportUrl": "https://bookscrubby.com/contact",
+      "dataDeletionUrl": "https://bookscrubby.com/removerdata",
       "router": {},
       "eas": {
         "projectId": "0c221866-29b4-446e-8e1e-21d728074c5f"
