@@ -4,9 +4,10 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import UpdateOne
+from pymongo import UpdateOne, ReturnDocument
 import os
 import asyncio
+import time
 import logging
 import requests
 import re
@@ -18,10 +19,67 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from twilio.rest import Client as TwilioClient
 import google_sheets as gs
+import secrets as _secrets
+import hmac as _hmac
+import hashlib as _hashlib
 
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# --- Background task retention (Fix: dropped-task GC) ---
+_BG_TASKS: "set[asyncio.Task]" = set()
+
+
+def _schedule_bg(coro, name: str = "bg"):
+    """Fire-and-forget an awaitable but keep a strong ref so the loop can't GC it,
+    and log any exception it raises."""
+    task = asyncio.create_task(coro, name=name)
+    _BG_TASKS.add(task)
+    def _done(t):
+        _BG_TASKS.discard(t)
+        exc = t.exception()
+        if exc:
+            logger.error("Background task %s failed: %s", t.get_name(), exc)
+    task.add_done_callback(_done)
+    return task
+
+
+# --- Signed URLs for job-proof photos (privacy: browsers can't add auth headers to <img>) ---
+_PROOF_URL_SECRET = os.environ.get("PROOF_URL_SECRET") or _secrets.token_urlsafe(48)
+_PROOF_URL_TTL_SECONDS = 60 * 60  # 1h — long enough for admin/cleaner to browse, short enough that leaked URLs expire
+
+
+def _sign_proof(path: str, expires_at: int) -> str:
+    msg = f"{path}|{expires_at}".encode()
+    return _hmac.new(_PROOF_URL_SECRET.encode(), msg, _hashlib.sha256).hexdigest()[:32]
+
+
+def _apply_proof_signature(url: str) -> str:
+    """If `url` points at a job-proof photo, append `?sig=…&exp=…`."""
+    if not url or "/proof/" not in url:
+        return url
+    # url looks like /api/app-images/file/{path}
+    prefix = "/api/app-images/file/"
+    if not url.startswith(prefix):
+        return url
+    path = url[len(prefix):]
+    exp = int(time.time()) + _PROOF_URL_TTL_SECONDS
+    sig = _sign_proof(path, exp)
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}sig={sig}&exp={exp}"
+
+
+def _proof_sig_ok(path: str, sig: Optional[str], exp: Optional[str]) -> bool:
+    if not sig or not exp:
+        return False
+    try:
+        exp_int = int(exp)
+    except (TypeError, ValueError):
+        return False
+    if exp_int < int(time.time()):
+        return False
+    return _hmac.compare_digest(sig, _sign_proof(path, exp_int))
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -218,7 +276,7 @@ async def create_quote(payload: QuoteCreate):
         _send_lead_sms(quote)
     except Exception as e:
         logger.error("SMS alert error: %s", e)
-    asyncio.create_task(_sync_quote_to_sheet(quote))
+    _schedule_bg(_sync_quote_to_sheet(quote), name="sync-sheet")
     return quote
 
 
@@ -233,7 +291,7 @@ async def _load_admin_password():
 
 def _check_admin(password: Optional[str]):
     expected = ADMIN_PW_CACHE["value"]
-    if not expected or password != expected:
+    if not expected or not password or not _secrets.compare_digest(str(password), str(expected)):
         raise HTTPException(status_code=401, detail="Invalid admin password")
 
 
@@ -589,7 +647,35 @@ async def reorder_app_images(payload: ReorderPayload, x_admin_password: Optional
 
 
 @api_router.get("/app-images/file/{path:path}")
-async def serve_app_image(path: str):
+async def serve_app_image(
+    path: str,
+    sig: Optional[str] = None,
+    exp: Optional[str] = None,
+    x_admin_password: Optional[str] = Header(default=None),
+    x_cleaner_id: Optional[str] = Header(default=None),
+    x_cleaner_pin: Optional[str] = Header(default=None),
+):
+    # Job-proof photos (customer property) require a valid short-lived signature
+    # (attached by _clean_assignment) OR admin/cleaner header auth.
+    if "/proof/" in path:
+        authorized = _proof_sig_ok(path, sig, exp)
+        if not authorized and x_admin_password:
+            try:
+                _check_admin(x_admin_password)
+                authorized = True
+            except HTTPException:
+                pass
+        if not authorized and x_cleaner_id and x_cleaner_pin:
+            try:
+                _check_pin(x_cleaner_pin, await _get_cleaner_pin())
+                parts = path.split("/proof/", 1)[1].split("/", 1)
+                aid = parts[0] if parts else ""
+                if aid and await db.assignments.find_one({"id": aid, "cleaner_id": x_cleaner_id}):
+                    authorized = True
+            except HTTPException:
+                pass
+        if not authorized:
+            raise HTTPException(status_code=401, detail="Auth required for proof photos")
     try:
         data, content_type = get_object(path)
         return Response(content=data, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
@@ -723,7 +809,7 @@ async def _get_cleaner_pin():
 
 
 def _check_pin(pin: Optional[str], expected: str):
-    if not pin or pin != expected:
+    if not pin or not _secrets.compare_digest(str(pin), str(expected)):
         raise HTTPException(status_code=401, detail="Invalid cleaner PIN")
 
 
@@ -734,7 +820,9 @@ class PinUpdate(BaseModel):
 @api_router.get("/staff/pin")
 async def get_staff_pin(x_admin_password: Optional[str] = Header(default=None)):
     _check_admin(x_admin_password)
-    return {"pin": await _get_cleaner_pin()}
+    doc = await db.app_settings.find_one({"key": "staff"})
+    pin = (doc or {}).get("cleaner_pin") or DEFAULT_CLEANER_PIN
+    return {"pin": pin, "is_default": pin == DEFAULT_CLEANER_PIN}
 
 
 @api_router.put("/staff/pin")
@@ -744,7 +832,7 @@ async def update_staff_pin(payload: PinUpdate, x_admin_password: Optional[str] =
     if not re.fullmatch(r"\d{4,8}", pin):
         raise HTTPException(status_code=400, detail="PIN must be 4-8 digits")
     await db.app_settings.update_one({"key": "staff"}, {"$set": {"cleaner_pin": pin}}, upsert=True)
-    return {"pin": pin}
+    return {"pin": pin, "is_default": pin == DEFAULT_CLEANER_PIN}
 
 
 class CleanerCheckin(BaseModel):
@@ -839,11 +927,6 @@ class AssignmentCreate(BaseModel):
     message: Optional[str] = None
 
 
-class AssignmentDone(BaseModel):
-    cleaner_id: str
-    pin: str
-
-
 ASSIGNMENT_FIELDS = ("id", "quote_id", "cleaner_id", "cleaner_name", "customer_name", "service_type",
                      "address", "phone", "preferred_date", "message", "status", "created_at",
                      "status_updated_at", "completed_at", "photos", "review_sent_at")
@@ -851,7 +934,11 @@ ASSIGNMENT_FIELDS = ("id", "quote_id", "cleaner_id", "cleaner_name", "customer_n
 
 def _clean_assignment(doc):
     out = {k: doc.get(k) for k in ASSIGNMENT_FIELDS}
-    out["photos"] = out.get("photos") or []
+    photos = out.get("photos") or []
+    # Attach a short-lived signature so admin/cleaner UIs can render proof photos over <img>.
+    out["photos"] = [
+        {**p, "url": _apply_proof_signature(p.get("url", ""))} for p in photos
+    ]
     return out
 
 
@@ -909,32 +996,35 @@ async def update_assignment_status(assignment_id: str, payload: AssignmentStatus
     _check_pin(payload.pin, await _get_cleaner_pin())
     if payload.status not in ("on_the_way", "cleaning", "done"):
         raise HTTPException(status_code=400, detail="Invalid status")
-    updates = {"status": payload.status, "status_updated_at": datetime.now(timezone.utc).isoformat()}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    updates = {"status": payload.status, "status_updated_at": now_iso}
     if payload.status == "done":
-        updates["completed_at"] = updates["status_updated_at"]
-    res = await db.assignments.update_one({"id": assignment_id, "cleaner_id": payload.cleaner_id}, {"$set": updates})
-    if res.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Assignment not found")
-    if payload.status == "done":
-        doc = await db.assignments.find_one({"id": assignment_id}, {"_id": 0})
-        if doc and not doc.get("review_sent_at"):
-            asyncio.create_task(_auto_send_review(doc))
-    return {"ok": True, "status": payload.status}
+        # Atomic transition-to-done: only the FIRST request that flips this doc's status
+        # to 'done' will match; a rapid double-tap by the cleaner will hit the second
+        # branch and NOT re-schedule the review SMS.
+        updates["completed_at"] = now_iso
+        doc = await db.assignments.find_one_and_update(
+            {"id": assignment_id, "cleaner_id": payload.cleaner_id, "status": {"$ne": "done"}},
+            {"$set": updates},
+            projection={"_id": 0},
+            return_document=ReturnDocument.AFTER,
+        )
+        if doc is None:
+            # already done — nothing to do (no duplicate SMS)
+            still = await db.assignments.find_one({"id": assignment_id, "cleaner_id": payload.cleaner_id})
+            if not still:
+                raise HTTPException(status_code=404, detail="Assignment not found")
+            return {"ok": True, "status": "done", "already": True}
+        if not doc.get("review_sent_at"):
+            _schedule_bg(_auto_send_review(doc), name=f"review-{assignment_id}")
+        return {"ok": True, "status": "done"}
 
-
-@api_router.post("/assignments/{assignment_id}/done")
-async def complete_assignment(assignment_id: str, payload: AssignmentDone):
-    _check_pin(payload.pin, await _get_cleaner_pin())
     res = await db.assignments.update_one(
-        {"id": assignment_id, "cleaner_id": payload.cleaner_id},
-        {"$set": {"status": "done", "completed_at": datetime.now(timezone.utc).isoformat()}},
+        {"id": assignment_id, "cleaner_id": payload.cleaner_id}, {"$set": updates}
     )
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Assignment not found")
-    doc = await db.assignments.find_one({"id": assignment_id}, {"_id": 0})
-    if doc and not doc.get("review_sent_at"):
-        asyncio.create_task(_auto_send_review(doc))
-    return {"ok": True}
+    return {"ok": True, "status": payload.status}
 
 
 # ---------------- Job History ----------------
@@ -1074,16 +1164,21 @@ async def send_review_request(assignment_id: str, x_admin_password: Optional[str
     sent = await run_in_threadpool(
         _send_review_sms, assignment["phone"], assignment.get("customer_name", ""), review_url
     )
+    if not sent:
+        raise HTTPException(
+            status_code=502,
+            detail="Could not send the SMS (Twilio not configured or send failed). Copy the review link and share it manually.",
+        )
     now = datetime.now(timezone.utc).isoformat()
     await db.assignments.update_one({"id": assignment_id}, {"$set": {"review_sent_at": now}})
-    return {"ok": True, "sent_via_sms": sent, "review_sent_at": now, "review_url": review_url}
+    return {"ok": True, "sent_via_sms": True, "review_sent_at": now, "review_url": review_url}
 
 
 app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
     allow_methods=["*"],
     allow_headers=["*"],

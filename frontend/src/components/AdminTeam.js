@@ -80,7 +80,7 @@ function CleanerRow({ item, index, onTrack, onDelete }) {
   );
 }
 
-function PinCard({ pin, setPin, savingPin, onSavePin, error, notice }) {
+function PinCard({ pin, setPin, savingPin, onSavePin, isDefault, error, notice }) {
   return (
     <View style={styles.pinCard}>
       <Text style={styles.pinTitle}>Cleaner PIN</Text>
@@ -88,6 +88,14 @@ function PinCard({ pin, setPin, savingPin, onSavePin, error, notice }) {
         Cleaners check in from the Contact tab → "Cleaner Check-In" with this PIN, then share live location while
         driving to a job.
       </Text>
+      {isDefault ? (
+        <View style={styles.pinWarn} testID="admin-pin-default-warn">
+          <Ionicons name="warning" size={14} color={COLORS.gold} />
+          <Text style={styles.pinWarnText}>
+            Your PIN is still the default. Change it now so only your team can check in.
+          </Text>
+        </View>
+      ) : null}
       <View style={styles.pinRow}>
         <TextInput
           style={styles.pinInput}
@@ -123,6 +131,7 @@ export default function AdminTeam({ password }) {
   const [refreshing, setRefreshing] = useState(false);
   const [pin, setPin] = useState('');
   const [savingPin, setSavingPin] = useState(false);
+  const [isDefaultPin, setIsDefaultPin] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [view, setView] = useState('list');
@@ -143,7 +152,10 @@ export default function AdminTeam({ password }) {
   useEffect(() => {
     load();
     fetchStaffPin(password)
-      .then((d) => setPin(d.pin || ''))
+      .then((d) => {
+        setPin(d.pin || '');
+        setIsDefaultPin(!!d.is_default);
+      })
       .catch(() => {});
     const timer = setInterval(load, 30000);
     return () => clearInterval(timer);
@@ -156,6 +168,7 @@ export default function AdminTeam({ password }) {
     try {
       const d = await updateStaffPin(pin.trim(), password);
       setPin(d.pin);
+      setIsDefaultPin(!!d.is_default);
       setNotice('PIN updated — cleaners already sharing must check in again with the new PIN.');
     } catch (e) {
       setError(e.message || 'PIN update failed');
@@ -236,6 +249,7 @@ export default function AdminTeam({ password }) {
             setPin={setPin}
             savingPin={savingPin}
             onSavePin={onSavePin}
+            isDefault={isDefaultPin}
             error={error}
             notice={notice}
           />
@@ -289,6 +303,18 @@ const styles = StyleSheet.create({
   },
   pinTitle: { color: COLORS.text, fontFamily: FONTS.bodySemiBold, fontSize: 15, marginBottom: 6 },
   pinHint: { color: COLORS.textMuted, fontFamily: FONTS.body, fontSize: 12.5, lineHeight: 18, marginBottom: 12 },
+  pinWarn: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(240,199,79,0.09)',
+    borderWidth: 1,
+    borderColor: 'rgba(240,199,79,0.35)',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  pinWarnText: { color: COLORS.gold, fontFamily: FONTS.bodyMedium, fontSize: 12.5, lineHeight: 18, flex: 1 },
   pinRow: { flexDirection: 'row', gap: 10 },
   pinInput: {
     flex: 1,

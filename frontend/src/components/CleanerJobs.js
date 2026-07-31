@@ -111,6 +111,16 @@ function PhotoRow({ job, kind, cleaner, onJobChange, setError }) {
 }
 
 export default function CleanerJobs({ jobs, onStatus, cleaner, onJobChange, setError }) {
+  const [busyJobId, setBusyJobId] = useState(null);
+  const handleStatus = async (job, key) => {
+    if (busyJobId) return;
+    setBusyJobId(job.id);
+    try {
+      await onStatus(job, key);
+    } finally {
+      setBusyJobId(null);
+    }
+  };
   return (
     <View style={styles.jobsSection}>
       <Text style={styles.jobsTitle}>Your Jobs</Text>
@@ -132,9 +142,7 @@ export default function CleanerJobs({ jobs, onStatus, cleaner, onJobChange, setE
                 testID={`cleaner-job-address-${index}`}
               >
                 <Ionicons name="location" size={15} color={COLORS.pink} />
-                <Text style={[styles.jobRowText, { color: COLORS.pink, fontFamily: FONTS.bodySemiBold }]}>
-                  {job.address}
-                </Text>
+                <Text style={[styles.jobRowText, styles.jobAddressText]}>{job.address}</Text>
               </TouchableOpacity>
             ) : null}
             {job.phone ? (
@@ -163,14 +171,20 @@ export default function CleanerJobs({ jobs, onStatus, cleaner, onJobChange, setE
             <View style={styles.statusRow}>
               {JOB_STEPS.map((s) => {
                 const active = job.status === s.key;
+                const disabled = busyJobId === job.id;
                 return (
                   <TouchableOpacity
                     key={s.key}
-                    style={[styles.statusBtn, active && styles.statusBtnActive]}
-                    onPress={() => onStatus(job, s.key)}
+                    style={[styles.statusBtn, active && styles.statusBtnActive, disabled && styles.statusBtnDisabled]}
+                    onPress={() => handleStatus(job, s.key)}
+                    disabled={disabled}
                     testID={`cleaner-job-${s.key}-${index}`}
                   >
-                    <Ionicons name={s.icon} size={14} color={active ? '#0A0611' : COLORS.textSoft} />
+                    {disabled && s.key === 'done' ? (
+                      <ActivityIndicator size="small" color={active ? '#0A0611' : COLORS.textSoft} />
+                    ) : (
+                      <Ionicons name={s.icon} size={14} color={active ? '#0A0611' : COLORS.textSoft} />
+                    )}
                     <Text style={[styles.statusBtnText, active && styles.statusBtnTextActive]}>{s.label}</Text>
                   </TouchableOpacity>
                 );
@@ -262,6 +276,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   statusBtnActive: { backgroundColor: COLORS.success, borderColor: COLORS.success },
+  statusBtnDisabled: { opacity: 0.55 },
+  jobAddressText: { color: COLORS.pink, fontFamily: FONTS.bodySemiBold },
   statusBtnText: { color: COLORS.textSoft, fontFamily: FONTS.bodySemiBold, fontSize: 11.5 },
   statusBtnTextActive: { color: '#0A0611' },
 });

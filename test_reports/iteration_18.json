@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 18 verified the TestFlight startup crash fix + 10 code-review fixes for Scrubby/Tidyups (Expo RN Web PWA + FastAPI). Confirmed api.js uses EXPO_PUBLIC_BACKEND_URL || 'https://bookmycleaning.xyz' fallback with no top-level throw (line 9). Backend regression pytest -n 0: 103/103 passed in 90.72s. Verified HMAC signed photos: unsigned/bad-sig requests to /api/app-images/file/.../proof/... return 401 (server.py lines 649-678 gate on _proof_sig_ok, admin header, or cleaner id+pin). Atomic assignment claim confirmed via find_one_and_update at server.py:1006 and tests TestCreateAssignment::test_re_assign_same_quote_replaces / test_re_assign_after_done_preserves_history passing. Background Twilio task uses tracked asyncio.create_task via _spawn_bg (lines 37-45) with strong ref set and done-callback logging — no 'coroutine was never awaited' or RuntimeWarning in backend supervisor logs. Idempotent review-request: review_sent_at only set after successful Twilio send at line 1173 (send path) and after successful SMS via _spawn_bg background task at line 1149; endpoint returns 502 when Twilio unconfigured (test_returns_502_when_twilio_unconfigured passing). Frontend regression: home bottom-cta-quote loads, /privacy → privacy-page testID, /terms → terms-page testID, /quote → quote-submit present and 5 SelectFields (select-service/property/bedrooms/bathrooms/province) all render and open bottom sheet with options (Home Cleaning, Deep Cleaning, Move-Out, etc.), cleaner check-in with 'TEST_UI_Cleaner_18' + PIN 1234 → sharing screen with 'Start Sharing Location' + jobs section, admin login with tidyups2026 → all 5 tabs (leads, history, images, business, team) render with real lead data.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iteration_18_pytest.xml",
+    "/app/backend/tests/test_assignments.py",
+    "/app/backend/tests/test_history_photos_reviews.py"
+  ],
+  "action_items": [
+    "NON-BLOCKING: review_request features_to_test lists a 'Dispatch' admin tab and admin-tab-dispatch selector — actual product has 5 tabs {Leads, History, Images, Business, Team}. All 5 render correctly. Update the review request wording (Leads instead of Dispatch) OR keep as-is; no code change needed.",
+    "NON-BLOCKING: review_request lists 5 quote selects {service, bedrooms, bathrooms, frequency, when}. Actual product exposes {service, property, bedrooms, bathrooms, province}. All 5 present + SelectField sheet opens correctly."
+  ],
+  "critical_code_review_comments": [
+    "server.py TestFlight-critical fixes verified: (a) _spawn_bg (lines 33-45) retains strong references in _BG_TASKS set and logs exceptions in done-callback — prevents GC of Twilio background tasks. (b) _apply_proof_signature/_proof_sig_ok (lines 48-82) use hmac.compare_digest with 1h TTL; serve_app_image (lines 649-683) enforces auth on /proof/ paths only. (c) Atomic assignment via db.assignments.find_one_and_update at line 1006 — single-writer wins. (d) review-request handler (lines 1100-1174) only sets review_sent_at after a successful Twilio send (both sync path line 1173 and background path line 1149) and returns 502 when Twilio env vars missing. (e) api.js line 9 gracefully falls back to hardcoded backend URL when EXPO_PUBLIC_BACKEND_URL is missing — no module-scope throw that would crash native TestFlight before React mounts.",
+    "server.py is 1202 lines — approaching the 700-line refactor threshold; consider splitting into routers (assignments, cleaner, images, admin) in a future pass. Not blocking for TestFlight."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_18.json",
+    "/app/test_reports/pytest/iteration_18_pytest.xml"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "Admin password: tidyups2026 (X-Admin-Password header). Cleaner PIN: 1234.",
+  "seed_data_creation": "None. Cleaner check-in used ephemeral name 'TEST_UI_Cleaner_18' + PIN 1234 (session-only, no DB persistence unless location/jobs called).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Admin route is /admin (not /staff). Admin login submit button testID is 'admin-login-btn' (not '-submit'). Cleaner check-in submit is 'cleaner-checkin-btn'. 5 admin tabs are {leads, history, images, business, team} — no 'dispatch' tab. Quote 5 selects are {service, property, bedrooms, bathrooms, province}. Preview URL: https://expo-book-cleaning.preview.emergentagent.com. Use pytest -n 0 (serial) — parallel run is flaky with shared state. HMAC proof-photo secret rotates on server restart (os.environ.get('PROOF_URL_SECRET') or fresh token_urlsafe), so pre-signed URLs across restarts will 401 — acceptable given 1h TTL.",
+  "rca_of_the_issue": "N/A — all requested P0 fixes verified working. TestFlight startup crash root cause was api.js throwing at module init when EXPO_PUBLIC_BACKEND_URL was missing in EAS native builds; fix uses ||-fallback so import never throws. Twilio background-task GC root cause was fire-and-forget asyncio.create_task without retained reference; fix stores task in module-level _BG_TASKS set until done-callback discards it."
+}

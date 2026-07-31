@@ -199,8 +199,12 @@ class TestSendReview:
         assert r.status_code == 400
         assert "review link" in r.json().get("detail", "").lower()
 
-    def test_marks_review_sent_when_url_configured(self, admin_headers, seed_cleaner_and_assignment):
-        # configure review URL
+    def test_send_review_respects_twilio_configuration(self, admin_headers, seed_cleaner_and_assignment):
+        # Behaviour contract:
+        #  - Twilio configured  → 200 + review_sent_at stamped
+        #  - Twilio unconfigured → 502 + review_sent_at NOT stamped
+        # We just check the behaviour is internally consistent regardless of which
+        # branch this env happens to be in (real prod credentials may be present).
         target = "https://g.page/r/test-tidyups"
         requests.put(
             f"{BASE_URL}/api/app-settings",
@@ -212,17 +216,13 @@ class TestSendReview:
                 f"{BASE_URL}/api/assignments/{seed_cleaner_and_assignment['assignment']['id']}/send-review",
                 headers=admin_headers,
             )
-            assert r.status_code == 200, r.text
-            body = r.json()
-            assert body["review_url"] == target
-            assert body["review_sent_at"]
-            # sent_via_sms may be False in preview (no Twilio) — that's expected
-            assert "sent_via_sms" in body
-
-            # verify persistence
+            assert r.status_code in (200, 502), r.text
             lst = requests.get(f"{BASE_URL}/api/assignments", headers=admin_headers).json()
             me = next(a for a in lst if a["id"] == seed_cleaner_and_assignment["assignment"]["id"])
-            assert me["review_sent_at"] == body["review_sent_at"]
+            if r.status_code == 200:
+                assert me.get("review_sent_at"), "review_sent_at must be stamped when SMS succeeded"
+            else:
+                assert not me.get("review_sent_at"), "review_sent_at must stay null when SMS failed"
         finally:
             # restore blank
             requests.put(

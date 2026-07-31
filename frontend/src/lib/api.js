@@ -1,21 +1,24 @@
 import { Platform } from 'react-native';
 
-const RAW = process.env.EXPO_PUBLIC_BACKEND_URL;
-if (!RAW) {
-  throw new Error('EXPO_PUBLIC_BACKEND_URL environment variable is required');
-}
-export const BASE_URL = RAW.replace(/\/+$/, '');
+// Fallback ensures native builds (TestFlight/App Store) don't crash on startup when
+// EXPO_PUBLIC_BACKEND_URL isn't baked in by EAS. Web deploys always set this; native
+// builds MAY be missing it if the EAS build wasn't given the secret.
+const BACKEND_FALLBACK = 'https://bookmycleaning.xyz';
+const IMAGES_FALLBACK = 'https://bookscrubby.com';
+
+const RAW = (process.env.EXPO_PUBLIC_BACKEND_URL || BACKEND_FALLBACK).replace(/\/+$/, '');
+export const BASE_URL = RAW;
 const API = `${BASE_URL}/api`;
 
 export const HTTP_UNAUTHORIZED = 401;
 
 // The app's OWN backend (image management). On web it is same-origin;
-// on native builds it comes from EXPO_PUBLIC_IMAGES_URL.
+// on native builds it comes from EXPO_PUBLIC_IMAGES_URL, falling back to bookscrubby.com.
 function computeImagesBase() {
   if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location && window.location.origin) {
     return window.location.origin;
   }
-  return (process.env.EXPO_PUBLIC_IMAGES_URL || RAW).replace(/\/+$/, '');
+  return (process.env.EXPO_PUBLIC_IMAGES_URL || IMAGES_FALLBACK).replace(/\/+$/, '');
 }
 export const IMAGES_BASE = computeImagesBase();
 const IMAGES_API = `${IMAGES_BASE}/api`;

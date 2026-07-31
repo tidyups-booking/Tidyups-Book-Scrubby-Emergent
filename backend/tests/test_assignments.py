@@ -239,9 +239,9 @@ class TestCleanerJobs:
         a2 = api.post(f"{BASE_URL}/api/assignments",
                       json=_mk_payload(seed_cleaner["id"]), headers=admin_headers).json()
 
-        # Mark a1 done
-        done = api.post(f"{BASE_URL}/api/assignments/{a1['id']}/done",
-                        json={"cleaner_id": seed_cleaner["id"], "pin": CLEANER_PIN})
+        # Mark a1 done (via new /status endpoint — /done was removed)
+        done = api.post(f"{BASE_URL}/api/assignments/{a1['id']}/status",
+                        json={"cleaner_id": seed_cleaner["id"], "pin": CLEANER_PIN, "status": "done"})
         assert done.status_code == 200
 
         jobs = api.get(f"{BASE_URL}/api/cleaners/{seed_cleaner['id']}/jobs",
@@ -265,15 +265,15 @@ class TestCleanerJobs:
                             headers={"X-Admin-Password": ADMIN_PASSWORD})
 
 
-# --------------------------- POST /assignments/{id}/done ---------------------------
+# --------------------------- POST /assignments/{id}/status done ---------------------------
 
 class TestCompleteAssignment:
     def test_wrong_pin_401(self, api, admin_headers, seed_cleaner):
         created = api.post(f"{BASE_URL}/api/assignments",
                            json=_mk_payload(seed_cleaner["id"]),
                            headers=admin_headers).json()
-        r = api.post(f"{BASE_URL}/api/assignments/{created['id']}/done",
-                     json={"cleaner_id": seed_cleaner["id"], "pin": "0000"})
+        r = api.post(f"{BASE_URL}/api/assignments/{created['id']}/status",
+                     json={"cleaner_id": seed_cleaner["id"], "pin": "0000", "status": "done"})
         assert r.status_code == 401
         requests.delete(f"{BASE_URL}/api/assignments/{created['id']}",
                         headers={"X-Admin-Password": ADMIN_PASSWORD})
@@ -282,8 +282,8 @@ class TestCompleteAssignment:
         created = api.post(f"{BASE_URL}/api/assignments",
                            json=_mk_payload(seed_cleaner["id"]),
                            headers=admin_headers).json()
-        r = api.post(f"{BASE_URL}/api/assignments/{created['id']}/done",
-                     json={"cleaner_id": "not-this-cleaner", "pin": CLEANER_PIN})
+        r = api.post(f"{BASE_URL}/api/assignments/{created['id']}/status",
+                     json={"cleaner_id": "not-this-cleaner", "pin": CLEANER_PIN, "status": "done"})
         assert r.status_code == 404
         requests.delete(f"{BASE_URL}/api/assignments/{created['id']}",
                         headers={"X-Admin-Password": ADMIN_PASSWORD})

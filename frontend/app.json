@@ -22,7 +22,6 @@
       ],
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Tidyups shares your live position with dispatch only while you tap 'Start Sharing Location' as a cleaner heading to a job. Sharing stops the moment you tap Stop.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Tidyups shares your live position with dispatch only while you tap 'Start Sharing Location' as a cleaner heading to a job. Sharing stops the moment you tap Stop.",
         "NSCameraUsageDescription": "Tidyups uses the camera so cleaners can snap before-and-after photos of the job site to share results with the customer.",
         "NSPhotoLibraryUsageDescription": "Tidyups accesses your photo library so you can attach an existing before/after photo to a job or upload a business logo/promo image.",
         "NSPhotoLibraryAddUsageDescription": "Tidyups saves job photos back to your library only if you tap Save.",

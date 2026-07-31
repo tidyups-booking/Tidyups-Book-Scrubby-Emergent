@@ -256,11 +256,11 @@ class TestAssignmentStatus:
             requests.delete(f"{BASE_URL}/api/assignments/{a['id']}",
                             headers={"X-Admin-Password": ORIGINAL_PW})
 
-    def test_legacy_done_endpoint_still_works(self, api, admin_headers, seed_cleaner):
+    def test_status_done_endpoint(self, api, admin_headers, seed_cleaner):
         a = self._create(api, admin_headers, seed_cleaner["id"])
         try:
-            r = api.post(f"{BASE_URL}/api/assignments/{a['id']}/done",
-                         json={"cleaner_id": seed_cleaner["id"], "pin": CLEANER_PIN})
+            r = api.post(f"{BASE_URL}/api/assignments/{a['id']}/status",
+                         json={"cleaner_id": seed_cleaner["id"], "pin": CLEANER_PIN, "status": "done"})
             assert r.status_code == 200
             admin_list = api.get(f"{BASE_URL}/api/assignments",
                                  headers={"X-Admin-Password": ORIGINAL_PW}).json()

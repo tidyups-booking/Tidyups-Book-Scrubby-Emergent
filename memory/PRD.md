@@ -227,3 +227,21 @@ Original build spec: /app/MOBILE_APP_SPEC.md.
     min 6 chars). Business tab "Dispatch Password" card (admin-pw-new/confirm/save); on success updates
     AsyncStorage + parent storedPw via onPasswordChanged. NOTE: cache is process-local — fine single-worker;
     multi-worker would need per-request DB read.
+
+
+- **Iteration 18 (Feb 2026, 103/103 backend + frontend 100%)** — TestFlight crash fix + 10 code-review fixes verified:
+  - **TestFlight startup crash fix**: `/app/frontend/src/lib/api.js` line 9 now falls back to hardcoded backend URL
+    when `EXPO_PUBLIC_BACKEND_URL` is missing at EAS build time (no top-level throw that would crash native app
+    before React mounts).
+  - **Atomic assignment claim**: `server.py:1006` uses `db.assignments.find_one_and_update` — single-writer wins,
+    prevents double-assignment races.
+  - **HMAC-signed proof photos**: `_apply_proof_signature/_proof_sig_ok` (server.py:48-82) use `hmac.compare_digest`
+    with 1h TTL; `serve_app_image` (649-683) enforces sig OR admin header OR cleaner+pin on `/proof/` paths.
+  - **Background Twilio task GC fix**: `_spawn_bg` (server.py:33-45) retains strong refs in `_BG_TASKS` set with
+    done-callback for exception logging — no "coroutine was never awaited" warnings.
+  - **Idempotent review-request**: `review_sent_at` only set after successful Twilio send (line 1173 sync path,
+    line 1149 background path); endpoint returns 502 when Twilio env vars missing.
+  - **iOS location metadata**: Removed "Always" location permission from app.json (only when-in-use).
+  - Backend regression: `pytest -n 0` 103/103 in 90.72s. Frontend regression: home, /privacy, /terms, /quote,
+    /cleaner check-in (PIN 1234), /admin login (tidyups2026) all 5 tabs — all pass.
+  - Report: `/app/test_reports/iteration_18.json`.
