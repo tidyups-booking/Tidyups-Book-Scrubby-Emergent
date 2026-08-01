@@ -165,7 +165,9 @@ jobs:
       - name: 📱 Build Development APK (Android)
         if: |
           matrix.platform == 'android' &&
-          (github.event.inputs.buildType == 'dev' || github.event.inputs.buildType == 'all')
+          (github.event_name == 'push' ||
+           github.event.inputs.buildType == 'dev' ||
+           github.event.inputs.buildType == 'all')
         run: |
           mkdir -p build
           eas build --platform android --profile development --local --non-interactive \
@@ -174,7 +176,9 @@ jobs:
       - name: 📱 Build Production APK (Android)
         if: |
           matrix.platform == 'android' &&
-          (github.event.inputs.buildType == 'prod-apk' || github.event.inputs.buildType == 'all')
+          (github.event_name == 'push' ||
+           github.event.inputs.buildType == 'prod-apk' ||
+           github.event.inputs.buildType == 'all')
         run: |
           mkdir -p build
           eas build --platform android --profile production-apk --local --non-interactive \
@@ -196,7 +200,9 @@ jobs:
       - name: 📱 Build iOS Development
         if: |
           matrix.platform == 'ios' &&
-          (github.event.inputs.buildType == 'ios-dev' || github.event.inputs.buildType == 'all')
+          (github.event_name == 'push' ||
+           github.event.inputs.buildType == 'ios-dev' ||
+           github.event.inputs.buildType == 'all')
         run: |
           mkdir -p build
           eas build --platform ios --profile development --local --non-interactive \
