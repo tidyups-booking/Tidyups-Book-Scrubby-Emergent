@@ -79,7 +79,7 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
           SLACK_TITLE: "Book Scrubby — Lint Results"
-          SLACK_MESSAGE: 'Lint ${{ job.status == "success" && "passed ✅" || "failed ❌" }}'
+          SLACK_MESSAGE: "Lint ${{ job.status == 'success' && 'passed ✅' || 'failed ❌' }}"
 
       - name: 📢 Notify test results via Discord
         if: always()
@@ -88,7 +88,7 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         with:
-          args: 'Book Scrubby lint ${{ job.status == "success" && "passed ✅" || "failed ❌" }}'
+          args: "Book Scrubby lint ${{ job.status == 'success' && 'passed ✅' || 'failed ❌' }}"
 
   # ─── Build & Deploy ─────────────────────────────────────────────────────────
   build-and-deploy:
@@ -152,7 +152,7 @@ jobs:
           chmod 600 AuthKey_676XW385F6.p8
 
       - name: 🤖 Create Google Play service account key (Android only)
-        if: matrix.platform == 'android' && secrets.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
+        if: matrix.platform == 'android' && env.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
         env:
           GOOGLE_PLAY_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
         run: |
@@ -248,14 +248,16 @@ jobs:
       # ─── Google Drive Upload (rclone) ──────────────────────────────────────
 
       - name: 🏗 Setup rclone
-        if: secrets.RCLONE_CONFIG_GDRIVE_TOKEN != ''
+        if: env.RCLONE_CONFIG_GDRIVE_TOKEN != ''
         uses: AnimMouse/setup-rclone@v1
+        env:
+          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
         with:
           version: latest
         continue-on-error: true
 
       - name: 📤 Upload builds to Google Drive
-        if: secrets.RCLONE_CONFIG_GDRIVE_TOKEN != ''
+        if: env.RCLONE_CONFIG_GDRIVE_TOKEN != ''
         continue-on-error: true
         env:
           RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
@@ -303,7 +305,7 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
           SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
           SLACK_TITLE: "Book Scrubby — ${{ matrix.platform }} Build"
-          SLACK_MESSAGE: '${{ matrix.platform }} build ${{ job.status == "success" && "completed ✅" || "failed ❌" }}'
+          SLACK_MESSAGE: "${{ matrix.platform }} build ${{ job.status == 'success' && 'completed ✅' || 'failed ❌' }}"
 
       - name: 📢 Notify build completion via Discord
         if: always()
@@ -312,4 +314,4 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         with:
-          args: 'Book Scrubby ${{ matrix.platform }} build ${{ job.status == "success" && "completed ✅" || "failed ❌" }}'
+          args: "Book Scrubby ${{ matrix.platform }} build ${{ job.status == 'success' && 'completed ✅' || 'failed ❌' }}"
