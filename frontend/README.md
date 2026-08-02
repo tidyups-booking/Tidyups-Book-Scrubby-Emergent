@@ -1,56 +1,58 @@
-# Welcome to your Expo app 👋
+# Book Scrubby Expo client
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+This directory is the application package root. Use Node.js 20 and Yarn Classic
+through Corepack; do not run npm install or use the archived
+`frontend_web_backup` package.
 
-## Get started
+## Local setup
 
-1. Install dependencies
+From the repository root:
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```powershell
+corepack yarn --cwd frontend install --frozen-lockfile
+Copy-Item frontend\.env.example frontend\.env.local
+corepack yarn --cwd frontend dev
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+`dev` opens the web app at `http://localhost:3000`. The environment values are
+optional for the hosted API defaults, but `.env.local` makes the selected
+endpoints explicit:
 
-### Other setup steps
+| Variable | Purpose |
+| --- | --- |
+| `EXPO_PUBLIC_BACKEND_URL` | Base URL for API requests |
+| `EXPO_PUBLIC_IMAGES_URL` | Base URL for hosted images |
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Never put credentials in an `EXPO_PUBLIC_*` variable; Expo embeds these values
+in the client bundle.
 
-## Learn more
+## Safe local validation
 
-To learn more about developing your project with Expo, look at the following resources:
+These commands run locally and do not submit, deploy, or consume EAS build
+quota:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```powershell
+corepack yarn --cwd frontend lint
+corepack yarn --cwd frontend typecheck
+corepack yarn --cwd frontend test
+corepack yarn --cwd frontend build
+corepack yarn --cwd frontend validate
+```
 
-## Join the community
+There is no frontend unit-test suite yet. `test` is the current static quality
+gate (ESLint plus TypeScript), while `validate` also performs a local static web
+export.
 
-Join our community of developers creating universal apps.
+## Credentialed or remote workflows
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Do not use `eas build`, `eas update`, `eas submit`, or trigger the publishing
+options in `.github/workflows/react-native-cicd.yml` for routine validation.
+Those paths can require Expo, Apple, Google Play, notification, or Google Drive
+credentials and can consume hosted runner time, service quota, or store access.
+
+The workflow expects repository secrets such as `EXPO_TOKEN2`,
+`ASC_API_KEY_P8_BASE64`, `GOOGLE_PLAY_SERVICE_ACCOUNT`, `SLACK_WEBHOOK`,
+`DISCORD_WEBHOOK`, `RCLONE_CONFIG_GDRIVE_TYPE`, and
+`RCLONE_CONFIG_GDRIVE_TOKEN`. Store submission also depends on the local
+credential file names configured in `eas.json`; neither credential file belongs
+in source control.

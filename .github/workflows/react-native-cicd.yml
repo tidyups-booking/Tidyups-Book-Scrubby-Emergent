@@ -39,7 +39,7 @@ env:
 jobs:
   check-skip:
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     steps:
       - name: Skip CI check
         run: echo "Proceeding with CI"
@@ -96,6 +96,10 @@ jobs:
     if: |
       (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
       || github.event_name == 'workflow_dispatch'
+    env:
+      GOOGLE_PLAY_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+      RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
+      RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -153,8 +157,6 @@ jobs:
 
       - name: 🤖 Create Google Play service account key (Android only)
         if: matrix.platform == 'android' && env.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
-        env:
-          GOOGLE_PLAY_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
         run: |
           mkdir -p build
           printf '%s' "$GOOGLE_PLAY_SERVICE_ACCOUNT" | base64 --decode > google-play-service-account.json
@@ -250,8 +252,6 @@ jobs:
       - name: 🏗 Setup rclone
         if: env.RCLONE_CONFIG_GDRIVE_TOKEN != ''
         uses: AnimMouse/setup-rclone@v1
-        env:
-          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
         with:
           version: latest
         continue-on-error: true
@@ -260,8 +260,6 @@ jobs:
         if: env.RCLONE_CONFIG_GDRIVE_TOKEN != ''
         continue-on-error: true
         env:
-          RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
-          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
           # Folder: https://drive.google.com/drive/folders/12oQKDzcP_wWVFG51LgUOL9_AojFct9cP
           RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: "12oQKDzcP_wWVFG51LgUOL9_AojFct9cP"
         run: |
