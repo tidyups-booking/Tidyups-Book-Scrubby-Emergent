@@ -13,19 +13,6 @@ on:
       - ".github/workflows/react-native-cicd.yml"
   workflow_dispatch:
     inputs:
-      buildType:
-        type: choice
-        description: "Build type to run"
-        default: "all"
-        options:
-          - dev
-          - prod-apk
-          - prod-aab
-          - ios-dev
-          - ios-prod
-          - publish-expo
-          - publish-stores
-          - all
       platform:
         type: choice
         description: Platform to build
@@ -37,7 +24,7 @@ on:
           - all
       buildType:
         type: choice
-        description: Artifact type
+        description: Artifact type to build
         required: true
         default: development
         options:
@@ -45,6 +32,8 @@ on:
           - android-apk
           - android-aab
           - ios-production
+          - publish-expo
+          - publish-stores
           - all
 
 permissions:
@@ -72,11 +61,11 @@ jobs:
           BUILD_TYPE: ${{ inputs.buildType || 'development' }}
         run: |
           case "$PLATFORM:$BUILD_TYPE" in
-            android:development|android:android-apk|android:android-aab|android:all)
+            android:development|android:android-apk|android:android-aab|android:publish-stores|android:all)
               ;;
-            ios:development|ios:ios-production|ios:all)
+            ios:development|ios:ios-production|ios:publish-stores|ios:all)
               ;;
-            all:development|all:all)
+            all:development|all:publish-expo|all:publish-stores|all:all)
               ;;
             *)
               echo "::error::$BUILD_TYPE is not valid for platform $PLATFORM."
