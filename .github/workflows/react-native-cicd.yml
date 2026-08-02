@@ -193,6 +193,26 @@ jobs:
           version: latest
         continue-on-error: true
 
+      - name: 🔌 Test Google Drive connection
+        continue-on-error: true
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
+          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
+          RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: "12oQKDzcP_wWVFG51LgUOL9_AojFct9cP"
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [gdrive]
+          type = ${RCLONE_CONFIG_GDRIVE_TYPE}
+          token = ${RCLONE_CONFIG_GDRIVE_TOKEN}
+          root_folder_id = ${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID}
+          EOF
+          chmod 600 ~/.config/rclone/rclone.conf
+
+          echo "Book Scrubby CI connected ✅ run=${{ github.run_id }} platform=${{ matrix.platform }} time=$(date -u)" > /tmp/ci-ping.txt
+          rclone copy /tmp/ci-ping.txt "gdrive:Book Scrubby Builds" -v
+          echo "✅ Test file uploaded to Google Drive"
+
       - name: 📤 Upload builds to Google Drive
         continue-on-error: true
         env:
