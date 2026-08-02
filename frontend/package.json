@@ -2,6 +2,7 @@
   "name": "frontend",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "packageManager": "yarn@1.22.22",
   "dependencies": {
     "@expo-google-fonts/outfit": "^0.4.3",
     "@expo-google-fonts/sora": "^0.4.2",
@@ -43,12 +44,16 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "CI=1 expo start --web --port 3000",
+    "dev": "expo start --web --port 3000",
+    "start": "expo start --web --port 3000",
     "build": "expo export -p web --output-dir build",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "eslint . && tsc --noEmit",
+    "validate": "yarn test && yarn build"
   },
   "private": true
 }

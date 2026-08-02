@@ -1,317 +1,182 @@
-name: React Native CI/CD
+name: Local EAS Builds
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - "frontend/**"
-      - ".github/workflows/react-native-cicd.yml"
-  pull_request:
-    branches: [main, master]
-    paths:
-      - "frontend/**"
   workflow_dispatch:
     inputs:
-      buildType:
-        type: choice
-        description: "Build type to run"
-        options:
-          - dev
-          - prod-apk
-          - prod-aab
-          - ios-dev
-          - ios-prod
-          - publish-expo
-          - publish-stores
-          - all
       platform:
         type: choice
-        description: "Platform to build"
-        default: "all"
+        description: Platform to build
+        required: true
+        default: android
         options:
           - android
           - ios
           - all
+      buildType:
+        type: choice
+        description: Artifact type
+        required: true
+        default: development
+        options:
+          - development
+          - android-apk
+          - android-aab
+          - ios-production
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-eas-${{ github.ref }}-${{ inputs.platform }}
+  cancel-in-progress: true
 
 env:
   NODE_VERSION: "20"
 
 jobs:
-  check-skip:
+  validate-request:
+    name: Validate build selection
     runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
-      - name: Skip CI check
-        run: echo "Proceeding with CI"
-
-  # ─── Lint / Validate ───────────────────────────────────────────────────────
-  test:
-    needs: check-skip
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - name: 🏗 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🏗 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: yarn
-          cache-dependency-path: frontend/yarn.lock
-
-      - name: 📦 Install dependencies
+      - name: Reject incompatible platform and artifact selections
+        shell: bash
         run: |
-          corepack enable
-          yarn install --frozen-lockfile
+          case "${{ inputs.platform }}:${{ inputs.buildType }}" in
+            android:development|android:android-apk|android:android-aab|android:all)
+              ;;
+            ios:development|ios:ios-production|ios:all)
+              ;;
+            all:development|all:all)
+              ;;
+            *)
+              echo "::error::${{ inputs.buildType }} is not valid for platform ${{ inputs.platform }}."
+              exit 1
+              ;;
+          esac
 
-      - name: 🧹 Run ESLint
-        run: yarn lint
-        continue-on-error: true
-
-      - name: 📢 Notify test results via Slack
-        if: always()
-        uses: rtCamp/action-slack-notify@v2
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
-          SLACK_TITLE: "Book Scrubby — Lint Results"
-          SLACK_MESSAGE: "Lint ${{ job.status == 'success' && 'passed ✅' || 'failed ❌' }}"
-
-      - name: 📢 Notify test results via Discord
-        if: always()
-        uses: Ilshidur/action-discord@0.3.2
-        continue-on-error: true
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        with:
-          args: "Book Scrubby lint ${{ job.status == 'success' && 'passed ✅' || 'failed ❌' }}"
-
-  # ─── Build & Deploy ─────────────────────────────────────────────────────────
-  build-and-deploy:
-    needs: test
-    if: |
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
-      || github.event_name == 'workflow_dispatch'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: android
-            runs-on: ubuntu-latest
-          - platform: ios
-            runs-on: macos-latest
-    runs-on: ${{ matrix.runs-on }}
+  android:
+    name: Build Android locally
+    needs: validate-request
+    if: ${{ inputs.platform == 'android' || inputs.platform == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: frontend
-
     steps:
-      - name: 🏗 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🏗 Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: yarn
           cache-dependency-path: frontend/yarn.lock
 
-      - name: ☕ Set up JDK 17 (Android only)
-        if: matrix.platform == 'android'
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: "17"
           distribution: temurin
 
-      - name: 📦 Install dependencies
-        run: |
-          corepack enable
-          yarn install --frozen-lockfile
+      - name: Install dependencies
+        run: corepack yarn install --frozen-lockfile
 
-      - name: 🔑 Set up Expo and EAS
+      - name: Require Expo access token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN2 }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN2 is required to access Expo-managed signing credentials."
+            exit 1
+          fi
+
+      - name: Set up Expo and EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN2 }}
 
-      - name: 🍎 Create App Store Connect key (iOS only)
-        if: matrix.platform == 'ios'
-        env:
-          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
-        run: |
-          if [ -z "$ASC_API_KEY_P8_BASE64" ]; then
-            echo "::error::ASC_API_KEY_P8_BASE64 secret is required for iOS builds."
-            exit 1
-          fi
-          mkdir -p build
-          printf '%s' "$ASC_API_KEY_P8_BASE64" | base64 --decode > AuthKey_676XW385F6.p8
-          chmod 600 AuthKey_676XW385F6.p8
+      - name: Prepare artifact directory
+        run: mkdir -p build
 
-      - name: 🤖 Create Google Play service account key (Android only)
-        if: matrix.platform == 'android' && env.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
-        env:
-          GOOGLE_PLAY_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
-        run: |
-          mkdir -p build
-          printf '%s' "$GOOGLE_PLAY_SERVICE_ACCOUNT" | base64 --decode > google-play-service-account.json
-          chmod 600 google-play-service-account.json
+      - name: Build development APK
+        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        run: eas build --platform android --profile development --local --non-interactive --output ./build/book-scrubby-dev.apk
 
-      # ─── Android Builds ────────────────────────────────────────────────────
+      - name: Build production APK
+        if: ${{ inputs.buildType == 'android-apk' || inputs.buildType == 'all' }}
+        run: eas build --platform android --profile production-apk --local --non-interactive --output ./build/book-scrubby-prod.apk
 
-      - name: 📱 Build Development APK (Android)
-        if: |
-          matrix.platform == 'android' &&
-          (github.event_name == 'push' ||
-           github.event.inputs.buildType == 'dev' ||
-           github.event.inputs.buildType == 'all')
-        run: |
-          mkdir -p build
-          eas build --platform android --profile development --local --non-interactive \
-            --output ./build/book-scrubby-dev.apk
+      - name: Build production AAB
+        if: ${{ inputs.buildType == 'android-aab' || inputs.buildType == 'all' }}
+        run: eas build --platform android --profile production --local --non-interactive --output ./build/book-scrubby-prod.aab
 
-      - name: 📱 Build Production APK (Android)
-        if: |
-          matrix.platform == 'android' &&
-          (github.event_name == 'push' ||
-           github.event.inputs.buildType == 'prod-apk' ||
-           github.event.inputs.buildType == 'all')
-        run: |
-          mkdir -p build
-          eas build --platform android --profile production-apk --local --non-interactive \
-            --output ./build/book-scrubby-prod.apk
-
-      - name: 📱 Build Production AAB (Android — Play Store)
-        if: |
-          matrix.platform == 'android' &&
-          (github.event_name == 'push' ||
-           github.event.inputs.buildType == 'prod-aab' ||
-           github.event.inputs.buildType == 'all')
-        run: |
-          mkdir -p build
-          eas build --platform android --profile production --local --non-interactive \
-            --output ./build/book-scrubby-prod.aab
-
-      # ─── iOS Builds ────────────────────────────────────────────────────────
-
-      - name: 📱 Build iOS Development
-        if: |
-          matrix.platform == 'ios' &&
-          (github.event_name == 'push' ||
-           github.event.inputs.buildType == 'ios-dev' ||
-           github.event.inputs.buildType == 'all')
-        run: |
-          mkdir -p build
-          eas build --platform ios --profile development --local --non-interactive \
-            --output ./build/book-scrubby-dev.app
-
-      - name: 📱 Build iOS Production IPA
-        if: |
-          matrix.platform == 'ios' &&
-          (github.event_name == 'push' ||
-           github.event.inputs.buildType == 'ios-prod' ||
-           github.event.inputs.buildType == 'all')
-        run: |
-          mkdir -p build
-          eas build --platform ios --profile production --local --non-interactive \
-            --output ./build/book-scrubby-prod.ipa
-
-      # ─── Store Submissions ─────────────────────────────────────────────────
-
-      - name: 🚀 Publish OTA update (Expo)
-        if: |
-          github.event.inputs.buildType == 'publish-expo' ||
-          github.event.inputs.buildType == 'all'
-        run: eas update --auto --non-interactive
-
-      - name: 🚀 Submit to Google Play Store (Android)
-        if: |
-          matrix.platform == 'android' &&
-          (github.event.inputs.buildType == 'publish-stores' ||
-           github.event.inputs.buildType == 'all')
-        run: eas submit --platform android --path ./build/book-scrubby-prod.aab --non-interactive
-
-      - name: 🚀 Submit to Apple App Store (iOS)
-        if: |
-          matrix.platform == 'ios' &&
-          (github.event.inputs.buildType == 'publish-stores' ||
-           github.event.inputs.buildType == 'all')
-        env:
-          EXPO_ASC_API_KEY_PATH: ./AuthKey_676XW385F6.p8
-          EXPO_ASC_KEY_ID: 676XW385F6
-          EXPO_ASC_ISSUER_ID: 207e2f58-9fab-4c4a-a87c-d292a1c2aaaa
-        run: eas submit --platform ios --path ./build/book-scrubby-prod.ipa --non-interactive
-
-      # ─── Google Drive Upload (rclone) ──────────────────────────────────────
-
-      - name: 🏗 Setup rclone
-        if: env.RCLONE_CONFIG_GDRIVE_TOKEN != ''
-        uses: AnimMouse/setup-rclone@v1
-        env:
-          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
-        with:
-          version: latest
-        continue-on-error: true
-
-      - name: 📤 Upload builds to Google Drive
-        if: env.RCLONE_CONFIG_GDRIVE_TOKEN != ''
-        continue-on-error: true
-        env:
-          RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
-          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
-          # Folder: https://drive.google.com/drive/folders/12oQKDzcP_wWVFG51LgUOL9_AojFct9cP
-          RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: "12oQKDzcP_wWVFG51LgUOL9_AojFct9cP"
-        run: |
-          mkdir -p ~/.config/rclone
-          cat > ~/.config/rclone/rclone.conf << EOF
-          [gdrive]
-          type = ${RCLONE_CONFIG_GDRIVE_TYPE}
-          token = ${RCLONE_CONFIG_GDRIVE_TOKEN}
-          root_folder_id = ${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID}
-          EOF
-          chmod 600 ~/.config/rclone/rclone.conf
-
-          VERSION=$(node -p "require('./app.json').expo.version")
-          BUILD_NUMBER=$(date +%Y%m%d%H%M)
-          FOLDER="Book Scrubby Builds/${VERSION}-${BUILD_NUMBER}-${{ matrix.platform }}"
-
-          rclone mkdir "gdrive:${FOLDER}"
-          rclone copy ./build "gdrive:${FOLDER}" \
-            --include "*.apk" --include "*.aab" --include "*.ipa" -v
-          echo "✅ Uploaded to Google Drive: ${FOLDER}"
-
-      # ─── Artifacts & Notifications ─────────────────────────────────────────
-
-      - name: 📦 Upload build artifacts to GitHub
-        if: always()
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: book-scrubby-${{ matrix.platform }}-${{ github.sha }}
+          name: book-scrubby-android-${{ inputs.buildType }}-${{ github.run_id }}
           path: |
             frontend/build/*.apk
             frontend/build/*.aab
-            frontend/build/*.ipa
-          retention-days: 14
-          if-no-files-found: ignore
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: 📢 Notify build completion via Slack
-        if: always()
-        uses: rtCamp/action-slack-notify@v2
-        continue-on-error: true
-        env:
-          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-          SLACK_COLOR: ${{ job.status == 'success' && 'good' || 'danger' }}
-          SLACK_TITLE: "Book Scrubby — ${{ matrix.platform }} Build"
-          SLACK_MESSAGE: "${{ matrix.platform }} build ${{ job.status == 'success' && 'completed ✅' || 'failed ❌' }}"
+  ios:
+    name: Build iOS locally
+    needs: validate-request
+    if: ${{ inputs.platform == 'ios' || inputs.platform == 'all' }}
+    runs-on: macos-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: 📢 Notify build completion via Discord
-        if: always()
-        uses: Ilshidur/action-discord@0.3.2
-        continue-on-error: true
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          args: "Book Scrubby ${{ matrix.platform }} build ${{ job.status == 'success' && 'completed ✅' || 'failed ❌' }}"
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install dependencies
+        run: corepack yarn install --frozen-lockfile
+
+      - name: Require Expo access token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN2 }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN2 is required to access Expo-managed signing credentials."
+            exit 1
+          fi
+
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN2 }}
+
+      - name: Prepare artifact directory
+        run: mkdir -p build
+
+      - name: Build development IPA
+        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        run: eas build --platform ios --profile development --local --non-interactive --output ./build/book-scrubby-dev.ipa
+
+      - name: Build production IPA
+        if: ${{ inputs.buildType == 'ios-production' || inputs.buildType == 'all' }}
+        run: eas build --platform ios --profile production --local --non-interactive --output ./build/book-scrubby-prod.ipa
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-scrubby-ios-${{ inputs.buildType }}-${{ github.run_id }}
+          path: frontend/build/*.ipa
+          if-no-files-found: error
+          retention-days: 7
