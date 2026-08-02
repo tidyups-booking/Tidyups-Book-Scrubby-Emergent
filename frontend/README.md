@@ -61,6 +61,9 @@ Expo-managed signing credentials. It only builds and uploads short-lived GitHub
 artifacts; it does not run `eas update`, `eas submit`, deploy, notify external
 services, or publish to a store.
 
+The separate **Local Validation (No Native Builds)** workflow is ordinary
+push/pull-request CI for linting and a static web export. It does not invoke EAS.
+
 Store submission is a separate, deliberate release task documented in
 `STORE_SUBMISSION_GUIDE.md`. Never place Apple, Google, or Expo credentials in
 source control.

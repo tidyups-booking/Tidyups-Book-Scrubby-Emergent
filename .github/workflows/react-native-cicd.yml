@@ -38,11 +38,17 @@ jobs:
   validate-request:
     name: Validate build selection
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.selection.outputs.matrix }}
     steps:
-      - name: Reject incompatible platform and artifact selections
+      - name: Validate inputs and select runners
+        id: selection
         shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          BUILD_TYPE: ${{ inputs.buildType }}
         run: |
-          case "${{ inputs.platform }}:${{ inputs.buildType }}" in
+          case "$PLATFORM:$BUILD_TYPE" in
             android:development|android:android-apk|android:android-aab|android:all)
               ;;
             ios:development|ios:ios-production|ios:all)
@@ -50,17 +56,32 @@ jobs:
             all:development|all:all)
               ;;
             *)
-              echo "::error::${{ inputs.buildType }} is not valid for platform ${{ inputs.platform }}."
+              echo "::error::$BUILD_TYPE is not valid for platform $PLATFORM."
               exit 1
               ;;
           esac
 
-  android:
-    name: Build Android locally
+          case "$PLATFORM" in
+            android)
+              matrix='{"include":[{"platform":"android","runner":"ubuntu-latest"}]}'
+              ;;
+            ios)
+              matrix='{"include":[{"platform":"ios","runner":"macos-latest"}]}'
+              ;;
+            all)
+              matrix='{"include":[{"platform":"android","runner":"ubuntu-latest"},{"platform":"ios","runner":"macos-latest"}]}'
+              ;;
+          esac
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.platform }} locally
     needs: validate-request
-    if: ${{ inputs.platform == 'android' || inputs.platform == 'all' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    strategy:
+      matrix: ${{ fromJSON(needs.validate-request.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: frontend
@@ -76,6 +97,7 @@ jobs:
           cache-dependency-path: frontend/yarn.lock
 
       - name: Set up JDK 17
+        if: ${{ matrix.platform == 'android' }}
         uses: actions/setup-java@v4
         with:
           java-version: "17"
@@ -103,80 +125,32 @@ jobs:
         run: mkdir -p build
 
       - name: Build development APK
-        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'android' && (inputs.buildType == 'development' || inputs.buildType == 'all') }}
         run: eas build --platform android --profile development --local --non-interactive --output ./build/book-scrubby-dev.apk
 
       - name: Build production APK
-        if: ${{ inputs.buildType == 'android-apk' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'android' && (inputs.buildType == 'android-apk' || inputs.buildType == 'all') }}
         run: eas build --platform android --profile production-apk --local --non-interactive --output ./build/book-scrubby-prod.apk
 
       - name: Build production AAB
-        if: ${{ inputs.buildType == 'android-aab' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'android' && (inputs.buildType == 'android-aab' || inputs.buildType == 'all') }}
         run: eas build --platform android --profile production --local --non-interactive --output ./build/book-scrubby-prod.aab
 
-      - name: Upload Android artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: book-scrubby-android-${{ inputs.buildType }}-${{ github.run_id }}
-          path: |
-            frontend/build/*.apk
-            frontend/build/*.aab
-          if-no-files-found: error
-          retention-days: 7
-
-  ios:
-    name: Build iOS locally
-    needs: validate-request
-    if: ${{ inputs.platform == 'ios' || inputs.platform == 'all' }}
-    runs-on: macos-latest
-    timeout-minutes: 120
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: yarn
-          cache-dependency-path: frontend/yarn.lock
-
-      - name: Install dependencies
-        run: corepack yarn install --frozen-lockfile
-
-      - name: Require Expo access token
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN2 }}
-        run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "::error::EXPO_TOKEN2 is required to access Expo-managed signing credentials."
-            exit 1
-          fi
-
-      - name: Set up Expo and EAS
-        uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN2 }}
-
-      - name: Prepare artifact directory
-        run: mkdir -p build
-
       - name: Build development IPA
-        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'ios' && (inputs.buildType == 'development' || inputs.buildType == 'all') }}
         run: eas build --platform ios --profile development --local --non-interactive --output ./build/book-scrubby-dev.ipa
 
       - name: Build production IPA
-        if: ${{ inputs.buildType == 'ios-production' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'ios' && (inputs.buildType == 'ios-production' || inputs.buildType == 'all') }}
         run: eas build --platform ios --profile production --local --non-interactive --output ./build/book-scrubby-prod.ipa
 
-      - name: Upload iOS artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: book-scrubby-ios-${{ inputs.buildType }}-${{ github.run_id }}
-          path: frontend/build/*.ipa
+          name: book-scrubby-${{ matrix.platform }}-${{ inputs.buildType }}-${{ github.run_id }}
+          path: |
+            frontend/build/*.apk
+            frontend/build/*.aab
+            frontend/build/*.ipa
           if-no-files-found: error
           retention-days: 7

@@ -1,4 +1,4 @@
-name: CI
+name: Local Validation (No Native Builds)
 
 on:
   push:
