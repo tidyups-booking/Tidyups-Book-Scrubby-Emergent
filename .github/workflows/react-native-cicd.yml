@@ -188,14 +188,12 @@ jobs:
       # ─── Google Drive Upload (rclone) ──────────────────────────────────────
 
       - name: 🏗 Setup rclone
-        if: secrets.RCLONE_CONFIG_GDRIVE_TOKEN != ''
         uses: AnimMouse/setup-rclone@v1
         with:
           version: latest
         continue-on-error: true
 
       - name: 📤 Upload builds to Google Drive
-        if: secrets.RCLONE_CONFIG_GDRIVE_TOKEN != ''
         continue-on-error: true
         env:
           RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
