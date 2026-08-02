@@ -13,7 +13,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONTS } from '../constants/theme';
-import { fetchAppSettings, updateAppSettings, uploadLogo, resetLogo, resolveImageUrl, changeAdminPassword } from '../lib/api';
+import { fetchAppSettings, updateAppSettings, uploadLogo, resetLogo, resolveImageUrl, changeAdminPassword, previewOwnerDigest, sendOwnerDigestNow } from '../lib/api';
 import { GradientButton } from './ui';
 import { useBusiness } from '../lib/business';
 
@@ -109,6 +109,121 @@ function ReviewRequestsCard({ form, set }) {
   );
 }
 
+function PhotoRequirementCard({ form, set }) {
+  const enabled = !!form.require_photos_for_done;
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Photo Requirements</Text>
+      <Text style={styles.reviewHint}>
+        When ON, cleaners can't mark a job Done until they've uploaded at least one <Text style={styles.emphasis}>before</Text>
+        {' '}and one <Text style={styles.emphasis}>after</Text> photo. Great for insurance protection and consistent proof-of-work.
+      </Text>
+      <TouchableOpacity
+        style={[styles.toggleRow, enabled && styles.toggleRowOn]}
+        onPress={() => set('require_photos_for_done')(!enabled)}
+        activeOpacity={0.85}
+        testID="admin-biz-require-photos-toggle"
+      >
+        <View style={styles.toggleTextWrap}>
+          <Text style={styles.toggleLabel}>Require before + after photo to mark Done</Text>
+          <Text style={styles.toggleSubLabel}>
+            {enabled ? 'Enforcing on every job' : 'Off — cleaners can mark Done anytime'}
+          </Text>
+        </View>
+        <View style={[styles.switch, enabled && styles.switchOn]}>
+          <View style={[styles.switchKnob, enabled && styles.switchKnobOn]} />
+        </View>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function DigestCard({ password }) {
+  const [preview, setPreview] = useState(null);
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const onPreview = async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const r = await previewOwnerDigest(password);
+      setPreview(r.body || '');
+      setTo(r.to || '');
+    } catch (e) {
+      setError(e.message || 'Preview failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSend = async () => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const r = await sendOwnerDigestNow(password);
+      setPreview(r.body || preview);
+      setNotice('Digest SMS sent.');
+    } catch (e) {
+      setError(e.message || 'Send failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <View style={styles.card} testID="admin-biz-digest-card">
+      <Text style={styles.cardTitle}>Owner Nightly Digest</Text>
+      <Text style={styles.reviewHint}>
+        Auto-sent as an SMS at 9pm local time to your owner phone (env <Text style={styles.emphasis}>DIGEST_TO_NUMBER</Text>) with today's leads,
+        jobs done, and any missed reviews. Preview it here anytime, or fire one now for testing.
+      </Text>
+      <View style={styles.digestButtonRow}>
+        <TouchableOpacity
+          style={[styles.smallBtn, SMALL_BTN_ADD_ROW, styles.digestBtnFlex]}
+          onPress={onPreview}
+          disabled={busy}
+          testID="admin-biz-digest-preview"
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color={COLORS.textSoft} />
+          ) : (
+            <Ionicons name="eye" size={15} color={COLORS.textSoft} />
+          )}
+          <Text style={styles.smallBtnText}>Preview digest</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.smallBtn, styles.digestSendBtn, styles.digestBtnFlex]}
+          onPress={onSend}
+          disabled={busy}
+          testID="admin-biz-digest-send-now"
+        >
+          {busy ? (
+            <ActivityIndicator size="small" color="#0A0611" />
+          ) : (
+            <Ionicons name="send" size={15} color="#0A0611" />
+          )}
+          <Text style={styles.digestSendBtnText}>Send now</Text>
+        </TouchableOpacity>
+      </View>
+      {to ? (
+        <Text style={styles.digestMeta} testID="admin-biz-digest-to">To: {to}</Text>
+      ) : null}
+      {preview ? (
+        <View style={styles.digestPreview} testID="admin-biz-digest-preview-body">
+          <Text style={styles.digestPreviewText}>{preview}</Text>
+        </View>
+      ) : null}
+      {error ? <Text style={styles.notesError}>{error}</Text> : null}
+      {notice ? <Text style={styles.digestNotice}>{notice}</Text> : null}
+    </View>
+  );
+}
+
 function HoursRow({ row, index, setHour, onRemove }) {
   return (
     <View style={styles.hourRow}>
@@ -177,6 +292,7 @@ function formToSettings(s) {
     city_line: s.city_line || '',
     website: s.website || '',
     review_url: s.review_url || '',
+    require_photos_for_done: !!s.require_photos_for_done,
     hours: (Array.isArray(s.hours) ? s.hours : []).map((h, i) => ({ ...h, _key: `row-${i}` })),
   };
 }
@@ -307,6 +423,8 @@ export default function AdminBusiness({ password, onPasswordChanged }) {
       <LogoCard logoUrl={logoUrl} logoBusy={logoBusy} onPickLogo={onPickLogo} onResetLogo={onResetLogo} />
       <ContactDetailsCard form={form} set={set} />
       <ReviewRequestsCard form={form} set={set} />
+      <PhotoRequirementCard form={form} set={set} />
+      <DigestCard password={password} />
       <BusinessHoursCard
         hours={form.hours}
         setHour={setHour}
@@ -422,4 +540,61 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     marginTop: -4,
   },
+  emphasis: { color: COLORS.gold, fontFamily: FONTS.bodySemiBold },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    padding: 12,
+  },
+  toggleRowOn: { borderColor: 'rgba(224,178,85,0.55)', backgroundColor: 'rgba(224,178,85,0.06)' },
+  toggleTextWrap: { flex: 1 },
+  toggleLabel: { color: COLORS.text, fontFamily: FONTS.bodySemiBold, fontSize: 13.5 },
+  toggleSubLabel: { color: COLORS.textMuted, fontFamily: FONTS.body, fontSize: 11.5, marginTop: 3 },
+  switch: {
+    width: 44,
+    height: 26,
+    borderRadius: 999,
+    backgroundColor: COLORS.borderStrong,
+    padding: 3,
+    justifyContent: 'center',
+  },
+  switchOn: { backgroundColor: COLORS.gold },
+  switchKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    backgroundColor: '#fff',
+    alignSelf: 'flex-start',
+  },
+  switchKnobOn: { alignSelf: 'flex-end' },
+  digestButtonRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  digestBtnFlex: { flex: 1, alignSelf: 'stretch', justifyContent: 'center' },
+  digestSendBtn: {
+    backgroundColor: COLORS.gold,
+    borderColor: COLORS.gold,
+  },
+  digestSendBtnText: { color: '#0A0611', fontFamily: FONTS.bodySemiBold, fontSize: 13 },
+  digestMeta: { color: COLORS.textMuted, fontFamily: FONTS.body, fontSize: 11.5, marginTop: 10 },
+  digestPreview: {
+    marginTop: 10,
+    backgroundColor: COLORS.bg,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 12,
+  },
+  digestPreviewText: { color: COLORS.text, fontFamily: FONTS.body, fontSize: 12.5, lineHeight: 19 },
+  digestNotice: {
+    color: COLORS.success,
+    fontFamily: FONTS.bodyMedium,
+    fontSize: 12,
+    marginTop: 8,
+  },
+  notesError: { color: COLORS.danger, fontFamily: FONTS.body, fontSize: 12, marginTop: 8 },
 });

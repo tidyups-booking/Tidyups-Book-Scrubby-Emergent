@@ -22,9 +22,11 @@
       ],
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Tidyups shares your live position with dispatch only while you tap 'Start Sharing Location' as a cleaner heading to a job. Sharing stops the moment you tap Stop.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Tidyups keeps sharing your live position with dispatch even when the app is in the background so your team can see you all the way to the customer. Sharing always stops the moment you tap Stop.",
         "NSCameraUsageDescription": "Tidyups uses the camera so cleaners can snap before-and-after photos of the job site to share results with the customer.",
         "NSPhotoLibraryUsageDescription": "Tidyups accesses your photo library so you can attach an existing before/after photo to a job or upload a business logo/promo image.",
         "NSPhotoLibraryAddUsageDescription": "Tidyups saves job photos back to your library only if you tap Save.",
+        "UIBackgroundModes": ["location", "fetch"],
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -36,12 +38,23 @@
         "foregroundImage": "./assets/images/icon.png"
       },
       "permissions": [
+<<<<<<< HEAD
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "READ_EXTERNAL_STORAGE"
+=======
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.RECORD_AUDIO"
+>>>>>>> origin/main
       ],
       "intentFilters": [
         {
@@ -87,7 +100,17 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Tidyups uses your location to share your live position with dispatch while you head to a job site."
+          "locationWhenInUsePermission": "Tidyups uses your location to share your live position with dispatch while you head to a job site.",
+          "locationAlwaysAndWhenInUsePermission": "Tidyups keeps sharing your live position with dispatch even when the app is in the background so your team can see you all the way to the customer.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Tidyups uses the camera so cleaners can rapid-snap before/after photos of the job site to share results with the customer.",
+          "recordAudioAndroid": false
         }
       ],
       [

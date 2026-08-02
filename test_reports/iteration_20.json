@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 20 — PWA cache-invalidation bug fix verification (P0). All requested checks PASS on preview. (1) Preview /sw.js served with CACHE='tidyups-v2' + stale-while-revalidate strategy for assets (grep confirmed 'stale-while-revalidate' comment + networkFetch always runs for GET asset requests even when cached copy exists). Navigations use network-first. (2) Preview /register-sw.js uses updateViaCache:'none', calls registration.update() on load, and auto-reloads on controllerchange (single-fire guard via 'refreshing' flag). (3) Preview DOM exposes all three testIDs: home-staff-login, home-cleaner-checkin, tab-staff — visually confirmed via screenshot: 'Staff Login' + 'Cleaner Check-in' cards visible and 6th 'Staff' bottom-tab present. navigator.serviceWorker.controller is active with scriptURL=/sw.js. (4) Production https://bookscrubby.com exposes the same three testIDs (DOM sanity ok), BUT production is still serving the OLD sw.js (CACHE='tidyups-v1', cache-first for assets, no updateViaCache/controllerchange in register-sw.js). Production has NOT yet been redeployed with the fix — noted by the reviewer as expected/separate deploy issue. (5) Backend regression: ADMIN_PASSWORD=tidyups pytest -n 0 → 111 passed, 0 failed, 1 unrelated warning in 88s.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iteration_20_pytest.xml"
+  ],
+  "action_items": [
+    "Deploy the sw.js + register-sw.js changes to production https://bookscrubby.com — currently prod still serves CACHE='tidyups-v1' cache-first sw.js and the minimal register-sw.js without updateViaCache/controllerchange. Returning PWA users on production will keep seeing stale UI until this deploy lands. Preview is fully patched; only production redeploy is pending."
+  ],
+  "critical_code_review_comments": [
+    "sw.js:23-61 — Correct SWR pattern for assets: caches.match first, then always kick off networkFetch that revalidates the cache, and catch() falls back to cached on network failure. Navigations remain network-first (line 28-40) which is right for HTML shell so a deploy is picked up immediately. Cache-bust on activate (line 14-21) deletes any keys != 'tidyups-v2', so old 'tidyups-v1' entries from prior installs get purged the moment the new SW activates.",
+    "register-sw.js:7 — updateViaCache:'none' correctly forces the browser to bypass HTTP cache when refetching sw.js itself (default browser behavior can cache sw.js up to 24h). registration.update() on every load (line 12) accelerates discovery. controllerchange listener at line 21-25 uses a 'refreshing' guard to avoid reload loops — good.",
+    "PROD still on old sw.js (tidyups-v1, cache-first) — this is the actual user-facing bug and it will NOT be resolved by the fix until prod is redeployed. Please prioritize the prod push."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_20.json",
+    "/app/test_reports/pytest/iteration_20_pytest.xml"
+  ],
+  "success_rate": { "backend": "100% (111/111)", "frontend": "100% (all 3 testIDs present preview + prod; preview sw+register-sw code correct)" },
+  "test_credentials": "Admin X-Admin-Password=tidyups (DB app_settings override).",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "PWA cache-invalidation fix (sw.js CACHE=tidyups-v2 + SWR for assets, register-sw.js updateViaCache:'none' + update() on load + controllerchange auto-reload) is verified on preview. Production redeploy still pending. Continue exporting ADMIN_PASSWORD=tidyups for pytest — 111/111 stable.",
+  "rca_of_the_issue": "Reported symptom 'preview doesn't show staff/cleaner login button' was not a code bug — the DOM already exposed home-staff-login, home-cleaner-checkin, tab-staff. Actual root cause: the old sw.js (CACHE='tidyups-v1') used cache-first on JS/asset requests, so returning PWA-installed devices kept getting the pre-tab-added JS bundle from disk and never revalidated. Fix: (a) bump CACHE to 'tidyups-v2' — activate handler deletes the old cache, (b) switch asset fetch strategy to stale-while-revalidate so every asset request kicks off a background network fetch that refreshes the cache (next load gets the new bundle), (c) register with updateViaCache:'none' + registration.update() every page load so browser always sees the freshly deployed sw.js, (d) listen to controllerchange and auto-reload once so the new SW's bundle actually runs. Preview verified; prod redeploy pending."
+}

@@ -375,6 +375,89 @@ export async function sendReviewRequest(assignmentId, password) {
   return res.json();
 }
 
+export async function fetchClientNotes(customerName, phone, password) {
+  const qs = new URLSearchParams({ customer_name: customerName, phone: phone || '' }).toString();
+  const res = await fetch(`${IMAGES_API}/clients/notes?${qs}`, {
+    headers: { 'X-Admin-Password': password },
+  });
+  if (res.status === HTTP_UNAUTHORIZED) throw new Error('Session expired — please sign in again.');
+  if (!res.ok) throw new Error('Failed to load client notes');
+  return res.json();
+}
+
+export async function saveClientNotes(customerName, phone, notes, password) {
+  const res = await fetch(`${IMAGES_API}/clients/notes`, {
+    method: 'PUT',
+    headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customer_name: customerName, phone: phone || '', notes: notes || '' }),
+  });
+  if (res.status === HTTP_UNAUTHORIZED) throw new Error('Session expired — please sign in again.');
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let detail = '';
+    try { detail = JSON.parse(text).detail || ''; } catch { detail = text.slice(0, 120); }
+    throw new Error(detail || 'Failed to save notes');
+  }
+  return res.json();
+}
+
+export async function mergeClients({ fromName, fromPhone, intoName, intoPhone }, password) {
+  const res = await fetch(`${IMAGES_API}/clients/merge`, {
+    method: 'POST',
+    headers: { 'X-Admin-Password': password, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from_name: fromName,
+      from_phone: fromPhone || '',
+      into_name: intoName,
+      into_phone: intoPhone || '',
+    }),
+  });
+  if (res.status === HTTP_UNAUTHORIZED) throw new Error('Session expired — please sign in again.');
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let detail = '';
+    try { detail = JSON.parse(text).detail || ''; } catch { detail = text.slice(0, 120); }
+    throw new Error(detail || 'Merge failed');
+  }
+  return res.json();
+}
+
+export async function previewOwnerDigest(password) {
+  const res = await fetch(`${IMAGES_API}/admin/digest/preview`, {
+    headers: { 'X-Admin-Password': password },
+  });
+  if (res.status === HTTP_UNAUTHORIZED) throw new Error('Session expired — please sign in again.');
+  if (!res.ok) throw new Error('Failed to load digest preview');
+  return res.json();
+}
+
+export async function sendOwnerDigestNow(password) {
+  const res = await fetch(`${IMAGES_API}/admin/digest/send-now`, {
+    method: 'POST',
+    headers: { 'X-Admin-Password': password },
+  });
+  if (res.status === HTTP_UNAUTHORIZED) throw new Error('Session expired — please sign in again.');
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let detail = '';
+    try { detail = JSON.parse(text).detail || ''; } catch { detail = text.slice(0, 120); }
+    throw new Error(detail || 'Digest send failed');
+  }
+  return res.json();
+}
+
+export function formatDuration(seconds) {
+  if (seconds == null || Number.isNaN(seconds) || seconds < 0) return null;
+  const s = Math.round(seconds);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const mins = m % 60;
+  if (h > 0) return mins > 0 ? `${h}h ${mins}m` : `${h}h`;
+  return `${m}m`;
+}
+
+
 export function formatDate(iso) {
   try {
     const d = new Date(iso);

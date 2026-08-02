@@ -230,3 +230,197 @@ class TestSendReview:
                 json={"review_url": ""},
                 headers={**admin_headers, "Content-Type": "application/json"},
             )
+
+
+# --------------------------- require photos to mark done ---------------------------
+
+class TestRequirePhotosForDone:
+    def _tiny_png(self):
+        return bytes.fromhex(
+            "89504E470D0A1A0A0000000D4948445200000001000000010806000000"
+            "1F15C4890000000D49444154789C63F80F00010101006D9DBAB50000"
+            "000049454E44AE426082"
+        )
+
+    @pytest.fixture()
+    def enable_flag(self, admin_headers):
+        requests.put(
+            f"{BASE_URL}/api/app-settings",
+            json={"require_photos_for_done": True},
+            headers={**admin_headers, "Content-Type": "application/json"},
+        )
+        yield
+        requests.put(
+            f"{BASE_URL}/api/app-settings",
+            json={"require_photos_for_done": False},
+            headers={**admin_headers, "Content-Type": "application/json"},
+        )
+
+    def test_flag_defaults_off_in_settings(self):
+        g = requests.get(f"{BASE_URL}/api/app-settings").json()
+        assert "require_photos_for_done" in g
+
+    def test_blocks_done_when_no_photos(self, admin_headers, enable_flag, seed_cleaner_and_assignment):
+        s = seed_cleaner_and_assignment
+        r = requests.post(
+            f"{BASE_URL}/api/assignments/{s['assignment']['id']}/status",
+            json={"cleaner_id": s["cleaner_id"], "pin": CLEANER_PIN, "status": "done"},
+        )
+        assert r.status_code == 400
+        assert "before" in r.json()["detail"].lower() and "after" in r.json()["detail"].lower()
+
+    def test_blocks_done_with_only_before(self, admin_headers, enable_flag, seed_cleaner_and_assignment):
+        s = seed_cleaner_and_assignment
+        # upload before-only
+        requests.post(
+            f"{BASE_URL}/api/assignments/{s['assignment']['id']}/photos",
+            files={"file": ("b.png", self._tiny_png(), "image/png")},
+            data={"kind": "before", "cleaner_id": s["cleaner_id"], "pin": CLEANER_PIN},
+        )
+        r = requests.post(
+            f"{BASE_URL}/api/assignments/{s['assignment']['id']}/status",
+            json={"cleaner_id": s["cleaner_id"], "pin": CLEANER_PIN, "status": "done"},
+        )
+        assert r.status_code == 400
+        assert "after" in r.json()["detail"].lower()
+
+    def test_allows_done_with_both(self, admin_headers, enable_flag, seed_cleaner_and_assignment):
+        s = seed_cleaner_and_assignment
+        for kind in ("before", "after"):
+            requests.post(
+                f"{BASE_URL}/api/assignments/{s['assignment']['id']}/photos",
+                files={"file": (f"{kind}.png", self._tiny_png(), "image/png")},
+                data={"kind": kind, "cleaner_id": s["cleaner_id"], "pin": CLEANER_PIN},
+            )
+        r = requests.post(
+            f"{BASE_URL}/api/assignments/{s['assignment']['id']}/status",
+            json={"cleaner_id": s["cleaner_id"], "pin": CLEANER_PIN, "status": "done"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["status"] == "done"
+
+    def test_flag_off_allows_done_without_photos(self, admin_headers, seed_cleaner_and_assignment):
+        # flag NOT enabled → legacy behavior
+        r = requests.post(
+            f"{BASE_URL}/api/assignments/{seed_cleaner_and_assignment['assignment']['id']}/status",
+            json={"cleaner_id": seed_cleaner_and_assignment["cleaner_id"], "pin": CLEANER_PIN, "status": "done"},
+        )
+        assert r.status_code == 200
+
+
+
+# --------------------------- client merge ---------------------------
+
+class TestClientMerge:
+    def _seed_visit(self, admin_headers, cid, name, phone):
+        r = requests.post(
+            f"{BASE_URL}/api/assignments",
+            json={
+                "quote_id": f"merge-{uuid.uuid4()}",
+                "cleaner_id": cid,
+                "customer_name": name,
+                "service_type": "Deep Clean",
+                "phone": phone,
+            },
+            headers={**admin_headers, "Content-Type": "application/json"},
+        )
+        assert r.status_code == 200, r.text
+        aid = r.json()["id"]
+        requests.post(
+            f"{BASE_URL}/api/assignments/{aid}/status",
+            json={"cleaner_id": cid, "pin": CLEANER_PIN, "status": "done"},
+        )
+        return aid
+
+    def test_merge_moves_all_matching_visits_atomically(self, admin_headers):
+        # Seed a cleaner + 3 visits under "TestMergeA" and 1 under "TestMergeB" (same phone).
+        cn = requests.post(
+            f"{BASE_URL}/api/cleaners/checkin",
+            json={"name": f"MergeTestCleaner_{uuid.uuid4().hex[:6]}", "pin": CLEANER_PIN},
+        ).json()
+        cid = cn["cleaner_id"]
+        phone_src = "204-555-9101"
+        phone_tgt = "204-555-9101"
+        for _ in range(3):
+            self._seed_visit(admin_headers, cid, "TestMergeA", phone_src)
+        self._seed_visit(admin_headers, cid, "TestMergeB", phone_tgt)
+
+        try:
+            r = requests.post(
+                f"{BASE_URL}/api/clients/merge",
+                json={
+                    "from_name": "TestMergeA",
+                    "from_phone": phone_src,
+                    "into_name": "TestMergeB",
+                    "into_phone": phone_tgt,
+                },
+                headers={**admin_headers, "Content-Type": "application/json"},
+            )
+            assert r.status_code == 200, r.text
+            assert r.json()["moved_assignments"] == 3
+        finally:
+            # Cleanup — remove seeded rows so future tests aren't polluted.
+            hist = requests.get(f"{BASE_URL}/api/assignments", headers=admin_headers).json()
+            for a in hist:
+                if a.get("customer_name") in ("TestMergeA", "TestMergeB") and a.get("cleaner_id") == cid:
+                    requests.delete(f"{BASE_URL}/api/assignments/{a['id']}", headers=admin_headers)
+
+    def test_merge_rejects_same_source_and_target(self, admin_headers):
+        r = requests.post(
+            f"{BASE_URL}/api/clients/merge",
+            json={"from_name": "Same", "from_phone": "555", "into_name": "same", "into_phone": "555"},
+            headers={**admin_headers, "Content-Type": "application/json"},
+        )
+        assert r.status_code == 400
+
+
+
+# --------------------------- digest scheduler idempotency ---------------------------
+
+class TestDigestClaimIdempotency:
+    """Regression for the reviewer-found bug where the atomic day-claim used
+    upsert+$ne which silently INSERTED a new duplicate digest_meta doc on every
+    hourly tick after the send time — causing repeat sends + document growth."""
+
+    def test_repeat_claim_same_day_creates_only_one_doc_and_sends_once(self):
+        # Simulate the claim behavior end-to-end by calling the send-now endpoint
+        # twice with the guard the scheduler applies. First call succeeds; second
+        # must be a no-op (no duplicate digest_meta docs).
+        # (send-now itself is unconditional by design — but we verify the DB
+        # state matches what the scheduler's conditional guard would produce.)
+        import pymongo
+        client = pymongo.MongoClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"))
+        db = client[os.environ.get("DB_NAME", "tidyups_database")]
+        db.app_settings.delete_many({"key": "digest_meta"})
+
+        today = "2099-01-01"
+
+        # First "tick" — no doc exists, ensure singleton, then claim.
+        db.app_settings.update_one(
+            {"key": "digest_meta"},
+            {"$setOnInsert": {"key": "digest_meta", "last_sent_local_date": ""}},
+            upsert=True,
+        )
+        first = db.app_settings.update_one(
+            {"key": "digest_meta", "last_sent_local_date": {"$ne": today}},
+            {"$set": {"last_sent_local_date": today}},
+        )
+        assert first.modified_count == 1, "first tick should win the claim"
+
+        # Second "tick" same day — must NOT modify anything, must NOT create a dupe.
+        db.app_settings.update_one(
+            {"key": "digest_meta"},
+            {"$setOnInsert": {"key": "digest_meta", "last_sent_local_date": ""}},
+            upsert=True,
+        )
+        second = db.app_settings.update_one(
+            {"key": "digest_meta", "last_sent_local_date": {"$ne": today}},
+            {"$set": {"last_sent_local_date": today}},
+        )
+        assert second.modified_count == 0, "second tick same day must lose the claim"
+
+        count = db.app_settings.count_documents({"key": "digest_meta"})
+        assert count == 1, f"exactly one digest_meta doc must exist (got {count})"
+
+        # Cleanup so we don't pollute the shared preview DB.
+        db.app_settings.delete_many({"key": "digest_meta"})

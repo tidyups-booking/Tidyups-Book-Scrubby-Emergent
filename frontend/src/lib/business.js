@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { CONTACT } from '../constants/data';
 import { fetchAppSettings, resolveImageUrl } from './api';
 
@@ -38,7 +38,9 @@ export function BusinessProvider({ children }) {
     refresh();
   }, [refresh]);
 
-  return <BusinessContext.Provider value={{ business, logoUrl, refresh }}>{children}</BusinessContext.Provider>;
+  const value = useMemo(() => ({ business, logoUrl, refresh }), [business, logoUrl, refresh]);
+
+  return <BusinessContext.Provider value={value}>{children}</BusinessContext.Provider>;
 }
 
 export const useBusiness = () => useContext(BusinessContext);

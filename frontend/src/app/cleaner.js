@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, FONTS } from '../constants/theme';
-import { checkinCleaner, fetchCleanerJobs, setAssignmentStatus, HTTP_UNAUTHORIZED } from '../lib/api';
+import { checkinCleaner, fetchCleanerJobs, setAssignmentStatus, fetchAppSettings, HTTP_UNAUTHORIZED } from '../lib/api';
 import { useLocationSharing } from '../lib/useLocationSharing';
 import { GradientButton, OutlineButton } from '../components/ui';
 import CleanerJobs from '../components/CleanerJobs';
@@ -103,6 +103,7 @@ export default function CleanerScreen() {
   const [checkinError, setCheckinError] = useState('');
   const [jobs, setJobs] = useState([]);
   const [jobsError, setJobsError] = useState('');
+  const [requirePhotos, setRequirePhotos] = useState(false);
   const location = useLocationSharing(profile);
 
   const loadJobs = useCallback(async (p) => {
@@ -126,6 +127,20 @@ export default function CleanerScreen() {
     const timer = setInterval(() => loadJobs(profile), JOBS_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [profile, loadJobs]);
+
+  useEffect(() => {
+    // Fetch the "photo required to mark Done" toggle so we can gray out the Done
+    // button when photos are missing. Polled once per minute so admin changes propagate.
+    let cancelled = false;
+    const load = () => {
+      fetchAppSettings()
+        .then((s) => !cancelled && setRequirePhotos(!!s.require_photos_for_done))
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
 
   useEffect(() => {
     AsyncStorage.getItem(PROFILE_KEY)
@@ -228,7 +243,7 @@ export default function CleanerScreen() {
           onStop={location.stop}
         />
 
-        <CleanerJobs jobs={jobs} onStatus={onJobStatus} cleaner={profile} onJobChange={onJobChange} setError={setJobsError} />
+        <CleanerJobs jobs={jobs} onStatus={onJobStatus} cleaner={profile} onJobChange={onJobChange} setError={setJobsError} requirePhotos={requirePhotos} />
 
         <TouchableOpacity style={styles.signout} onPress={onSignout} testID="cleaner-signout">
           <Text style={styles.signoutText}>Sign out ({profile.name})</Text>

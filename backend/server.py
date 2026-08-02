@@ -46,7 +46,13 @@ def _schedule_bg(coro, name: str = "bg"):
 
 
 # --- Signed URLs for job-proof photos (privacy: browsers can't add auth headers to <img>) ---
-_PROOF_URL_SECRET = os.environ.get("PROOF_URL_SECRET") or _secrets.token_urlsafe(48)
+_PROOF_URL_SECRET_ENV = os.environ.get("PROOF_URL_SECRET")
+if not _PROOF_URL_SECRET_ENV:
+    logging.getLogger(__name__).warning(
+        "PROOF_URL_SECRET is not set — signed proof URLs will use an ephemeral key that resets "
+        "on every restart and differs between workers. Set a stable value in backend/.env."
+    )
+_PROOF_URL_SECRET = _PROOF_URL_SECRET_ENV or _secrets.token_urlsafe(48)
 _PROOF_URL_TTL_SECONDS = 60 * 60  # 1h — long enough for admin/cleaner to browse, short enough that leaked URLs expire
 
 
@@ -714,6 +720,7 @@ DEFAULT_BUSINESS = {
     ],
     "logo_url": None,
     "review_url": "",
+    "require_photos_for_done": False,
 }
 
 
@@ -738,6 +745,7 @@ class BusinessSettingsUpdate(BaseModel):
     website: Optional[str] = None
     hours: Optional[List[HoursRow]] = None
     review_url: Optional[str] = None
+    require_photos_for_done: Optional[bool] = None
 
 
 async def _get_business_merged():
@@ -929,17 +937,55 @@ class AssignmentCreate(BaseModel):
 
 ASSIGNMENT_FIELDS = ("id", "quote_id", "cleaner_id", "cleaner_name", "customer_name", "service_type",
                      "address", "phone", "preferred_date", "message", "status", "created_at",
-                     "status_updated_at", "completed_at", "photos", "review_sent_at")
+                     "status_updated_at", "started_at", "completed_at", "photos", "review_sent_at")
 
 
-def _clean_assignment(doc):
+def _job_duration_seconds(doc) -> Optional[int]:
+    """Return the number of seconds the cleaner was actively working the job
+    (started_at -> completed_at). None until both timestamps exist."""
+    started, completed = doc.get("started_at"), doc.get("completed_at")
+    if not started or not completed:
+        return None
+    try:
+        s = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        c = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+        delta = (c - s).total_seconds()
+        return int(delta) if delta >= 0 else None
+    except (ValueError, AttributeError):
+        return None
+
+
+def _client_key(name: Optional[str], phone: Optional[str]) -> str:
+    """Stable per-customer key: lowercased trimmed name + digits-only phone."""
+    n = (name or "").strip().lower()
+    p = re.sub(r"\D", "", phone or "")
+    return f"{n}|{p}"
+
+
+async def _load_client_notes_map(assignments: List[dict]) -> dict:
+    """Fetch client notes for a batch of assignments in one query, keyed by _client_key."""
+    keys = list({_client_key(a.get("customer_name"), a.get("phone")) for a in assignments})
+    if not keys:
+        return {}
+    docs = await db.client_notes.find({"key": {"$in": keys}}, {"_id": 0}).to_list(len(keys))
+    return {d["key"]: d.get("notes", "") for d in docs}
+
+
+def _clean_assignment(doc, notes: str = ""):
     out = {k: doc.get(k) for k in ASSIGNMENT_FIELDS}
     photos = out.get("photos") or []
     # Attach a short-lived signature so admin/cleaner UIs can render proof photos over <img>.
     out["photos"] = [
         {**p, "url": _apply_proof_signature(p.get("url", ""))} for p in photos
     ]
+    out["client_notes"] = notes
+    out["duration_seconds"] = _job_duration_seconds(doc)
     return out
+
+
+async def _clean_assignments_with_notes(docs: List[dict]) -> List[dict]:
+    notes_map = await _load_client_notes_map(docs)
+    return [_clean_assignment(d, notes_map.get(_client_key(d.get("customer_name"), d.get("phone")), "")) for d in docs]
 
 
 @api_router.post("/assignments")
@@ -957,14 +1003,15 @@ async def create_assignment(payload: AssignmentCreate, x_admin_password: Optiona
     }
     await db.assignments.delete_many({"quote_id": payload.quote_id, "status": {"$ne": "done"}})
     await db.assignments.insert_one(doc)
-    return _clean_assignment(doc)
+    notes_map = await _load_client_notes_map([doc])
+    return _clean_assignment(doc, notes_map.get(_client_key(doc.get("customer_name"), doc.get("phone")), ""))
 
 
 @api_router.get("/assignments")
 async def list_assignments(x_admin_password: Optional[str] = Header(default=None)):
     _check_admin(x_admin_password)
     docs = await db.assignments.find({}).sort("created_at", -1).to_list(500)
-    return [_clean_assignment(d) for d in docs]
+    return await _clean_assignments_with_notes(docs)
 
 
 @api_router.delete("/assignments/{assignment_id}")
@@ -982,7 +1029,7 @@ async def cleaner_jobs(cleaner_id: str, x_cleaner_pin: Optional[str] = Header(de
     docs = await db.assignments.find(
         {"cleaner_id": cleaner_id, "status": {"$in": ["assigned", "on_the_way", "cleaning"]}}
     ).sort("created_at", -1).to_list(100)
-    return [_clean_assignment(d) for d in docs]
+    return await _clean_assignments_with_notes(docs)
 
 
 class AssignmentStatusUpdate(BaseModel):
@@ -998,7 +1045,40 @@ async def update_assignment_status(assignment_id: str, payload: AssignmentStatus
         raise HTTPException(status_code=400, detail="Invalid status")
     now_iso = datetime.now(timezone.utc).isoformat()
     updates = {"status": payload.status, "status_updated_at": now_iso}
+    if payload.status == "cleaning":
+        # Stamp started_at the FIRST time the cleaner marks the job "cleaning" — the
+        # start of the timer. Uses $setOnInsert-style semantics via a separate query
+        # below so re-tapping "cleaning" doesn't reset the timer.
+        existing = await db.assignments.find_one(
+            {"id": assignment_id, "cleaner_id": payload.cleaner_id},
+            {"_id": 0, "started_at": 1},
+        )
+        if existing is not None and not existing.get("started_at"):
+            updates["started_at"] = now_iso
     if payload.status == "done":
+        # Insurance-protection guard: if admin has toggled "require photos for done",
+        # block the transition when this assignment lacks at least 1 before + 1 after photo.
+        biz = await _get_business_merged()
+        if biz.get("require_photos_for_done"):
+            existing = await db.assignments.find_one(
+                {"id": assignment_id, "cleaner_id": payload.cleaner_id},
+                {"_id": 0, "photos": 1},
+            )
+            if existing is None:
+                raise HTTPException(status_code=404, detail="Assignment not found")
+            photos = existing.get("photos") or []
+            has_before = any(p.get("kind") == "before" for p in photos)
+            has_after = any(p.get("kind") == "after" for p in photos)
+            if not (has_before and has_after):
+                missing = []
+                if not has_before:
+                    missing.append("before")
+                if not has_after:
+                    missing.append("after")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"At least one {' and one '.join(missing)} photo is required before marking this job Done.",
+                )
         # Atomic transition-to-done: only the FIRST request that flips this doc's status
         # to 'done' will match; a rapid double-tap by the cleaner will hit the second
         # branch and NOT re-schedule the review SMS.
@@ -1040,7 +1120,113 @@ async def assignments_history(
     if cleaner_id:
         query["cleaner_id"] = cleaner_id
     docs = await db.assignments.find(query).sort("completed_at", -1).to_list(limit)
-    return [_clean_assignment(d) for d in docs]
+    return await _clean_assignments_with_notes(docs)
+
+
+# ---------------- Client Notes ----------------
+class ClientNotesUpdate(BaseModel):
+    customer_name: str
+    phone: Optional[str] = ""
+    notes: str
+
+
+@api_router.get("/clients/notes")
+async def get_client_notes(
+    customer_name: str,
+    phone: Optional[str] = "",
+    x_admin_password: Optional[str] = Header(default=None),
+):
+    _check_admin(x_admin_password)
+    key = _client_key(customer_name, phone)
+    doc = await db.client_notes.find_one({"key": key}, {"_id": 0})
+    return {
+        "customer_name": customer_name,
+        "phone": phone or "",
+        "notes": (doc or {}).get("notes", ""),
+        "updated_at": (doc or {}).get("updated_at"),
+    }
+
+
+@api_router.put("/clients/notes")
+async def put_client_notes(payload: ClientNotesUpdate, x_admin_password: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_password)
+    key = _client_key(payload.customer_name, payload.phone)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    notes = (payload.notes or "").strip()
+    if len(notes) > 2000:
+        raise HTTPException(status_code=400, detail="Notes too long (max 2000 characters)")
+    await db.client_notes.update_one(
+        {"key": key},
+        {"$set": {
+            "key": key,
+            "customer_name": payload.customer_name,
+            "phone": payload.phone or "",
+            "notes": notes,
+            "updated_at": now_iso,
+        }},
+        upsert=True,
+    )
+    return {"customer_name": payload.customer_name, "phone": payload.phone or "", "notes": notes, "updated_at": now_iso}
+
+
+class ClientMergeRequest(BaseModel):
+    from_name: str
+    from_phone: Optional[str] = ""
+    into_name: str
+    into_phone: Optional[str] = ""
+
+
+@api_router.post("/clients/merge")
+async def merge_client(payload: ClientMergeRequest, x_admin_password: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_password)
+    from_key = _client_key(payload.from_name, payload.from_phone)
+    into_key = _client_key(payload.into_name, payload.into_phone)
+    if from_key == into_key:
+        raise HTTPException(status_code=400, detail="Source and target are already the same client")
+
+    # Two-phase merge: (1) find candidate assignment IDs by name (case-insensitive), then
+    # filter to those whose digits-only phone matches the source; (2) do ONE atomic
+    # update_many by IDs. This gives all-or-nothing semantics for the write itself and
+    # avoids the per-doc loop that could partial-fail.
+    from_phone_digits = re.sub(r"\D", "", payload.from_phone or "")
+    name_regex = {"$regex": f"^{re.escape(payload.from_name.strip())}$", "$options": "i"}
+    candidates = await db.assignments.find(
+        {"customer_name": name_regex}, {"_id": 0, "id": 1, "phone": 1}
+    ).to_list(None)
+    ids_to_move = [
+        c["id"] for c in candidates
+        if re.sub(r"\D", "", c.get("phone") or "") == from_phone_digits
+    ]
+    moved = 0
+    if ids_to_move:
+        result = await db.assignments.update_many(
+            {"id": {"$in": ids_to_move}},
+            {"$set": {"customer_name": payload.into_name, "phone": payload.into_phone or ""}},
+        )
+        moved = result.modified_count
+
+    # Merge notes: concatenate source notes into target if both present.
+    src_notes_doc = await db.client_notes.find_one({"key": from_key})
+    tgt_notes_doc = await db.client_notes.find_one({"key": into_key})
+    src_notes = (src_notes_doc or {}).get("notes", "").strip()
+    tgt_notes = (tgt_notes_doc or {}).get("notes", "").strip()
+    combined = tgt_notes
+    if src_notes and src_notes not in tgt_notes:
+        combined = f"{tgt_notes}\n\n[merged from {payload.from_name}] {src_notes}".strip() if tgt_notes else src_notes
+    if combined:
+        await db.client_notes.update_one(
+            {"key": into_key},
+            {"$set": {
+                "key": into_key,
+                "customer_name": payload.into_name,
+                "phone": payload.into_phone or "",
+                "notes": combined,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
+    await db.client_notes.delete_one({"key": from_key})
+    return {"moved_assignments": moved, "into_key": into_key, "merged_notes": bool(src_notes and combined != tgt_notes)}
 
 
 # ---------------- Photo Proof ----------------
@@ -1174,6 +1360,150 @@ async def send_review_request(assignment_id: str, x_admin_password: Optional[str
     return {"ok": True, "sent_via_sms": True, "review_sent_at": now, "review_url": review_url}
 
 
+# ---------------- Owner Nightly Digest ----------------
+def _digest_local_today_bounds():
+    """Return today's ISO-string bounds in UTC (start-of-day, next-day) for the owner's TZ.
+    Uses DIGEST_TZ_OFFSET_HOURS (default -7 = Edmonton/Mountain) to define "today"."""
+    try:
+        tz_off = int(os.environ.get("DIGEST_TZ_OFFSET_HOURS", "-7"))
+    except ValueError:
+        tz_off = -7
+    now_utc = datetime.now(timezone.utc)
+    local_now = now_utc + timedelta(hours=tz_off)
+    local_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_start = (local_start - timedelta(hours=tz_off))
+    utc_end = utc_start + timedelta(days=1)
+    return utc_start.isoformat(), utc_end.isoformat(), local_now.date().isoformat()
+
+
+async def _build_digest_body() -> str:
+    utc_start, utc_end, local_date = _digest_local_today_bounds()
+
+    leads_today = await db.quotes.count_documents({"created_at": {"$gte": utc_start, "$lt": utc_end}})
+    top_lead = await db.quotes.find_one(
+        {"created_at": {"$gte": utc_start, "$lt": utc_end}},
+        sort=[("created_at", -1)],
+    )
+
+    done_today = await db.assignments.count_documents({
+        "status": "done",
+        "completed_at": {"$gte": utc_start, "$lt": utc_end},
+    })
+    missed_reviews = await db.assignments.count_documents({
+        "status": "done",
+        "completed_at": {"$gte": utc_start, "$lt": utc_end},
+        "$or": [{"review_sent_at": None}, {"review_sent_at": {"$exists": False}}],
+    })
+
+    lines = [f"Scrubby daily digest · {local_date}"]
+    lines.append(f"• Leads today: {leads_today}")
+    if top_lead:
+        lines.append(f"  ↳ latest: {top_lead.get('name','?')} — {top_lead.get('service_type','?')}")
+    lines.append(f"• Jobs done: {done_today}")
+    lines.append(f"• Missed reviews: {missed_reviews}")
+    return "\n".join(lines)
+
+
+def _send_digest_sms(body: str) -> bool:
+    sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    token = os.environ.get("TWILIO_AUTH_TOKEN")
+    from_number = os.environ.get("TWILIO_FROM_NUMBER")
+    to = os.environ.get("DIGEST_TO_NUMBER") or os.environ.get("LEAD_ALERT_TO")
+    if not all([sid, token, from_number, to]):
+        logger.warning("Digest not sent — Twilio or DIGEST_TO_NUMBER missing")
+        return False
+    try:
+        TwilioClient(sid, token).messages.create(body=body, from_=from_number, to=to)
+        logger.info("Owner digest SMS sent to %s", to)
+        return True
+    except Exception as e:
+        logger.error("Digest SMS failed: %s", e)
+        return False
+
+
+async def _send_digest_now() -> dict:
+    body = await _build_digest_body()
+    sent = await run_in_threadpool(_send_digest_sms, body)
+    if sent:
+        await db.app_settings.update_one(
+            {"key": "digest_meta"},
+            {"$set": {"key": "digest_meta", "last_sent_local_date": _digest_local_today_bounds()[2],
+                      "last_sent_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    return {"sent": sent, "body": body}
+
+
+@api_router.post("/admin/digest/send-now")
+async def admin_digest_send_now(x_admin_password: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_password)
+    result = await _send_digest_now()
+    if not result["sent"]:
+        raise HTTPException(status_code=502, detail="Digest not sent — check DIGEST_TO_NUMBER and Twilio env vars.")
+    return result
+
+
+@api_router.get("/admin/digest/preview")
+async def admin_digest_preview(x_admin_password: Optional[str] = Header(default=None)):
+    _check_admin(x_admin_password)
+    body = await _build_digest_body()
+    return {"body": body, "to": os.environ.get("DIGEST_TO_NUMBER") or os.environ.get("LEAD_ALERT_TO") or ""}
+
+
+async def _digest_scheduler_loop():
+    """Fires once per day at DIGEST_HOUR (local, per DIGEST_TZ_OFFSET_HOURS). Idempotent via
+    an atomic day-claim on `digest_meta` so multiple workers can safely coexist."""
+    try:
+        target_hour = int(os.environ.get("DIGEST_HOUR", "21"))  # 9pm default
+    except ValueError:
+        target_hour = 21
+    logger.info("Digest scheduler started (target hour=%s)", target_hour)
+    while True:
+        try:
+            try:
+                tz_off = int(os.environ.get("DIGEST_TZ_OFFSET_HOURS", "-7"))
+            except ValueError:
+                tz_off = -7
+            local_now = datetime.now(timezone.utc) + timedelta(hours=tz_off)
+            local_today = local_now.date().isoformat()
+            if local_now.hour >= target_hour:
+                # Ensure the singleton `digest_meta` doc exists exactly once. `$setOnInsert`
+                # + upsert is a true no-op if the doc already exists — no duplicates. This is
+                # required because MongoDB's upsert on a `$ne` filter with an already-matching
+                # value silently inserts a NEW doc (that was the bug in the original claim).
+                await db.app_settings.update_one(
+                    {"key": "digest_meta"},
+                    {"$setOnInsert": {"key": "digest_meta", "last_sent_local_date": ""}},
+                    upsert=True,
+                )
+                # Now claim today WITHOUT upsert. Only the FIRST worker to flip
+                # `last_sent_local_date` -> today succeeds (modified_count == 1). Every
+                # subsequent tick in the same day returns modified_count == 0 and skips.
+                claim = await db.app_settings.update_one(
+                    {"key": "digest_meta", "last_sent_local_date": {"$ne": local_today}},
+                    {"$set": {"last_sent_local_date": local_today,
+                              "claimed_at": datetime.now(timezone.utc).isoformat()}},
+                )
+                if claim.modified_count == 1:
+                    # We won today's claim — send. On failure, roll the claim back so the
+                    # next tick (or the next day) can retry.
+                    result = await _send_digest_now()
+                    if not result.get("sent"):
+                        await db.app_settings.update_one(
+                            {"key": "digest_meta", "last_sent_local_date": local_today},
+                            {"$set": {"last_sent_local_date": ""}},
+                        )
+            # sleep until the top of the next hour (max 1h)
+            next_wake = local_now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+            sleep_s = max(60, min(3600, int((next_wake - local_now).total_seconds())))
+            await asyncio.sleep(sleep_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error("Digest scheduler error: %s", e)
+            await asyncio.sleep(300)
+
+
 app.include_router(api_router)
 
 app.add_middleware(
@@ -1195,6 +1525,19 @@ async def on_startup():
     await seed_site_images()
     await seed_app_images()
     await _load_admin_password()
+    # Clean up any duplicate digest_meta docs that may have accumulated from the old
+    # buggy upsert claim (pre-fix). Keep the one with the latest last_sent_local_date.
+    try:
+        dupes = await db.app_settings.find({"key": "digest_meta"}).to_list(50)
+        if len(dupes) > 1:
+            dupes.sort(key=lambda d: d.get("last_sent_local_date", ""), reverse=True)
+            keep_id = dupes[0]["_id"]
+            await db.app_settings.delete_many({"key": "digest_meta", "_id": {"$ne": keep_id}})
+            logger.info("Cleaned up %d duplicate digest_meta docs", len(dupes) - 1)
+    except Exception as e:
+        logger.warning("digest_meta dedupe failed: %s", e)
+    # Start the nightly owner digest scheduler in the background.
+    _schedule_bg(_digest_scheduler_loop(), name="digest-scheduler")
 
 
 @app.on_event("shutdown")

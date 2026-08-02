@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 19 backend-only verification of the digest scheduler idempotency fix + full pytest regression. All 3 required checks pass: (1) Seeded 3 duplicate digest_meta docs, restarted backend → exactly 1 doc remains (kept the one with the latest last_sent_local_date='2026-01-05', which matches the on_startup dedupe logic at server.py:1528-1538). (2) Simulated three same-day scheduler ticks against real Mongo: tick 1 modified_count=1 (claim wins), ticks 2 & 3 modified_count=0 (no-op) and digest_meta doc count stays at exactly 1 — confirming the $setOnInsert-then-non-upsert-$ne-claim pattern at server.py:1470-1495 is idempotent and does NOT insert duplicates on repeat same-day ticks. (3) Regression: pytest -n 0 (serial) with ADMIN_PASSWORD=tidyups → 111 passed, 0 failed, 1 unrelated warning in 38.38s. TestDigestClaimIdempotency in test_history_photos_reviews.py passes in isolation (0.12s) and as part of the full run. Native-only frontend bugs (rapid-camera stale jobRef in CleanerJobs.js PhotoRow, useLocationSharing.js background 401 → AsyncStorage flag) were NOT exercised end-to-end per review request instructions.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/test_reports/pytest/iteration_19_pytest.xml",
+    "/app/backend/tests/test_history_photos_reviews.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:1470-1495 digest claim is now correct — `$setOnInsert` upsert guarantees the singleton exists without touching last_sent_local_date; the subsequent non-upsert update with `$ne: today` atomically flips the date exactly once per day. Second same-day tick returns modified_count=0 and produces no side effects. Rollback path (line 1492-1495) also uses non-upsert.",
+    "server.py:1528-1538 on_startup dedupe correctly sorts existing digest_meta docs by last_sent_local_date descending and deletes all except the newest — this both fixes pre-fix accumulation and preserves the most recent claim state, preventing a same-day re-send after restart. Verified live: 3 seeded docs → 1 doc after supervisor restart.",
+    "test_history_photos_reviews.py:380 TestDigestClaimIdempotency reproduces the exact bug scenario (two same-day claim cycles) and asserts modified_count sequence (1, 0) and count_documents==1 — passing.",
+    "PROTECTED admin password mismatch note (NOT a bug, informational): tests default to ADMIN_PASSWORD env or hardcoded 'tidyups2026', but memory/test_credentials.md says DB app_settings key='security' was changed to 'tidyups'. The .env baseline is still 'tidyups2026'. Running pytest without exporting ADMIN_PASSWORD=tidyups causes ~58 spurious 401 failures against endpoints that check the DB-overridden password. Suggest either (a) update backend .env baseline to 'tidyups' OR (b) revert the DB app_settings key='security' back to baseline. Not a fix requested this iteration."
+  ],
+  "updated_files": [
+    "/app/test_reports/iteration_19.json",
+    "/app/test_reports/pytest/iteration_19_pytest.xml"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "N/A (not tested per request)" },
+  "test_credentials": "Admin: X-Admin-Password=tidyups (DB app_settings override; baseline in .env is tidyups2026). Cleaner PIN: 1234.",
+  "seed_data_creation": "Temporarily seeded 3 duplicate digest_meta docs in Mongo app_settings to verify the on_startup dedupe path, then simulated 3 same-day scheduler ticks. All test seed data was deleted at end of verification (final delete_many({'key':'digest_meta'}) executed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "For future pytest runs export ADMIN_PASSWORD=tidyups (matches current DB app_settings override) — the baseline backend/.env value 'tidyups2026' will produce 401s across ~58 admin-guarded tests. Use pytest -n 0 (serial); parallel xdist run has known state-contention flakiness on TestCleanerAdmin. Digest scheduler idempotency fix is production-ready.",
+  "rca_of_the_issue": "Original bug: upsert=True with filter {last_sent_local_date: {$ne: today}} — when today's date already matched the existing doc, the filter excluded it, and upsert INSERTED a new duplicate every tick → same-day repeat SMS sends and unbounded digest_meta doc growth. Fix (server.py:1470-1495): (1) idempotent $setOnInsert upsert to guarantee singleton, (2) claim update WITHOUT upsert so $ne-mismatch simply returns modified_count=0 instead of inserting, (3) on_startup dedupe (server.py:1528-1538) collapses any pre-fix duplicates keeping the newest last_sent_local_date. Verified live end-to-end."
+}

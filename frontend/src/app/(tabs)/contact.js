@@ -8,13 +8,18 @@ import { COLORS, FONTS, GRADIENT } from '../../constants/theme';
 import { useBusiness } from '../../lib/business';
 import { SectionHeader, Card } from '../../components/ui';
 
+// Stable references — hoisted so LinearGradient doesn't see new object refs every render.
+const GRADIENT_START = { x: 0, y: 0 };
+const GRADIENT_END = { x: 1, y: 1 };
+const FLEX1_STYLE = { flex: 1 };
+
 function ContactRow({ icon, title, sub, onPress, testID }) {
   return (
     <TouchableOpacity activeOpacity={onPress ? 0.8 : 1} onPress={onPress} testID={testID} style={styles.rowCard}>
-      <LinearGradient colors={GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.rowIcon}>
+      <LinearGradient colors={GRADIENT} start={GRADIENT_START} end={GRADIENT_END} style={styles.rowIcon}>
         {icon}
       </LinearGradient>
-      <View style={{ flex: 1 }}>
+      <View style={FLEX1_STYLE}>
         <Text style={styles.rowTitle}>{title}</Text>
         {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
       </View>

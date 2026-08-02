@@ -41,12 +41,16 @@ const renderGalleryIcon = ({ color, focused }) => (
 const renderContactIcon = ({ color, focused }) => (
   <Ionicons name={focused ? 'call' : 'call-outline'} size={22} color={color} />
 );
+const renderStaffIcon = ({ color, focused }) => (
+  <Ionicons name={focused ? 'shield-checkmark' : 'shield-checkmark-outline'} size={22} color={color} />
+);
 
 const HOME_OPTIONS = { title: 'Home', tabBarButtonTestID: 'tab-home', tabBarIcon: renderHomeIcon };
 const SERVICES_OPTIONS = { title: 'Services', tabBarButtonTestID: 'tab-services', tabBarIcon: renderServicesIcon };
 const QUOTE_OPTIONS = { title: 'Get Quote', tabBarButtonTestID: 'tab-quote', tabBarIcon: renderQuoteIcon };
 const GALLERY_OPTIONS = { title: 'Gallery', tabBarButtonTestID: 'tab-gallery', tabBarIcon: renderGalleryIcon };
 const CONTACT_OPTIONS = { title: 'Contact', tabBarButtonTestID: 'tab-contact', tabBarIcon: renderContactIcon };
+const STAFF_OPTIONS = { title: 'Staff', tabBarButtonTestID: 'tab-staff', tabBarIcon: renderStaffIcon };
 
 export default function TabsLayout() {
   return (
@@ -56,6 +60,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="quote" options={QUOTE_OPTIONS} />
       <Tabs.Screen name="gallery" options={GALLERY_OPTIONS} />
       <Tabs.Screen name="contact" options={CONTACT_OPTIONS} />
+      <Tabs.Screen name="staff" options={STAFF_OPTIONS} />
     </Tabs>
   );
 }
