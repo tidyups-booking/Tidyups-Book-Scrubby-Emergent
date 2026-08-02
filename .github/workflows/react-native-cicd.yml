@@ -1,10 +1,6 @@
 name: Local EAS Builds
 
 on:
-<<<<<<< Updated upstream
-  workflow_dispatch:
-    inputs:
-=======
   push:
     branches: [main, master]
     paths:
@@ -30,7 +26,6 @@ on:
           - publish-expo
           - publish-stores
           - all
->>>>>>> Stashed changes
       platform:
         type: choice
         description: Platform to build
@@ -66,11 +61,17 @@ jobs:
   validate-request:
     name: Validate build selection
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.selection.outputs.matrix }}
     steps:
-      - name: Reject incompatible platform and artifact selections
+      - name: Validate inputs and select runners
+        id: selection
         shell: bash
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          BUILD_TYPE: ${{ inputs.buildType }}
         run: |
-          case "${{ inputs.platform }}:${{ inputs.buildType }}" in
+          case "$PLATFORM:$BUILD_TYPE" in
             android:development|android:android-apk|android:android-aab|android:all)
               ;;
             ios:development|ios:ios-production|ios:all)
@@ -78,19 +79,11 @@ jobs:
             all:development|all:all)
               ;;
             *)
-              echo "::error::${{ inputs.buildType }} is not valid for platform ${{ inputs.platform }}."
+              echo "::error::$BUILD_TYPE is not valid for platform $PLATFORM."
               exit 1
               ;;
           esac
 
-<<<<<<< Updated upstream
-  android:
-    name: Build Android locally
-    needs: validate-request
-    if: ${{ inputs.platform == 'android' || inputs.platform == 'all' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-=======
       - name: 🧹 Run ESLint
         run: yarn lint
         continue-on-error: true
@@ -135,7 +128,29 @@ jobs:
           - platform: ios
             runs-on: macos-latest
     runs-on: ${{ matrix.runs-on }}
->>>>>>> Stashed changes
+=======
+          case "$PLATFORM" in
+            android)
+              matrix='{"include":[{"platform":"android","runner":"ubuntu-latest"}]}'
+              ;;
+            ios)
+              matrix='{"include":[{"platform":"ios","runner":"macos-latest"}]}'
+              ;;
+            all)
+              matrix='{"include":[{"platform":"android","runner":"ubuntu-latest"},{"platform":"ios","runner":"macos-latest"}]}'
+              ;;
+          esac
+
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.platform }} locally
+    needs: validate-request
+    strategy:
+      matrix: ${{ fromJSON(needs.validate-request.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+>>>>>>> c6cec082e0806243297f4460288d99aa0093f61f
     defaults:
       run:
         working-directory: frontend
@@ -151,6 +166,7 @@ jobs:
           cache-dependency-path: frontend/yarn.lock
 
       - name: Set up JDK 17
+        if: ${{ matrix.platform == 'android' }}
         uses: actions/setup-java@v4
         with:
           java-version: "17"
@@ -178,20 +194,17 @@ jobs:
         run: mkdir -p build
 
       - name: Build development APK
-        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'android' && (inputs.buildType == 'development' || inputs.buildType == 'all') }}
         run: eas build --platform android --profile development --local --non-interactive --output ./build/book-scrubby-dev.apk
 
       - name: Build production APK
-        if: ${{ inputs.buildType == 'android-apk' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'android' && (inputs.buildType == 'android-apk' || inputs.buildType == 'all') }}
         run: eas build --platform android --profile production-apk --local --non-interactive --output ./build/book-scrubby-prod.apk
 
       - name: Build production AAB
-        if: ${{ inputs.buildType == 'android-aab' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'android' && (inputs.buildType == 'android-aab' || inputs.buildType == 'all') }}
         run: eas build --platform android --profile production --local --non-interactive --output ./build/book-scrubby-prod.aab
 
-<<<<<<< Updated upstream
-      - name: Upload Android artifacts
-=======
       - name: 📱 Build Production APK (Android)
         if: |
           matrix.platform == 'android' &&
@@ -306,7 +319,6 @@ jobs:
 
       - name: 📦 Upload build artifacts to GitHub
         if: always()
->>>>>>> Stashed changes
         uses: actions/upload-artifact@v4
         with:
           name: book-scrubby-android-${{ inputs.buildType }}-${{ github.run_id }}
@@ -357,18 +369,55 @@ jobs:
       - name: Prepare artifact directory
         run: mkdir -p build
 
+=======
+>>>>>>> c6cec082e0806243297f4460288d99aa0093f61f
       - name: Build development IPA
-        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'ios' && (inputs.buildType == 'development' || inputs.buildType == 'all') }}
         run: eas build --platform ios --profile development --local --non-interactive --output ./build/book-scrubby-dev.ipa
 
       - name: Build production IPA
-        if: ${{ inputs.buildType == 'ios-production' || inputs.buildType == 'all' }}
+        if: ${{ matrix.platform == 'ios' && (inputs.buildType == 'ios-production' || inputs.buildType == 'all') }}
         run: eas build --platform ios --profile production --local --non-interactive --output ./build/book-scrubby-prod.ipa
 
-      - name: Upload iOS artifacts
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: book-scrubby-ios-${{ inputs.buildType }}-${{ github.run_id }}
-          path: frontend/build/*.ipa
+          name: book-scrubby-${{ matrix.platform }}-${{ inputs.buildType }}-${{ github.run_id }}
+          path: |
+            frontend/build/*.apk
+            frontend/build/*.aab
+            frontend/build/*.ipa
           if-no-files-found: error
           retention-days: 7
+
+      - name: Set up rclone
+        if: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN != '' }}
+        uses: AnimMouse/setup-rclone@v1
+        with:
+          version: latest
+
+      - name: Back up build to Google Drive
+        if: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN != '' }}
+        continue-on-error: true
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
+          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
+          # Folder: https://drive.google.com/drive/folders/12oQKDzcP_wWVFG51LgUOL9_AojFct9cP
+          RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: "12oQKDzcP_wWVFG51LgUOL9_AojFct9cP"
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [gdrive]
+          type = ${RCLONE_CONFIG_GDRIVE_TYPE}
+          token = ${RCLONE_CONFIG_GDRIVE_TOKEN}
+          root_folder_id = ${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID}
+          EOF
+          chmod 600 ~/.config/rclone/rclone.conf
+
+          VERSION=$(node -p "require('./app.json').expo.version")
+          FOLDER="Book Scrubby Builds/${VERSION}-${{ inputs.buildType }}-${{ github.run_id }}-${{ matrix.platform }}"
+
+          rclone mkdir "gdrive:${FOLDER}"
+          rclone copy ./build "gdrive:${FOLDER}" \
+            --include "*.apk" --include "*.aab" --include "*.ipa" -v
+          echo "Uploaded to Google Drive: ${FOLDER}"

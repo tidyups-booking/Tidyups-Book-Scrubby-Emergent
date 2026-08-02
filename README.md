@@ -24,6 +24,10 @@ For installable Android or iOS artifacts, manually run the **Local EAS Builds**
 GitHub Actions workflow. It is the repository's only recommended native build
 path and uses `eas build --local`; it never submits or deploys an app.
 
+The other active workflow, **Local Validation (No Native Builds)**, only runs
+frontend checks and creates a static web export on pushes and pull requests. It
+does not invoke EAS or produce an installable mobile artifact.
+
 The Python API in [`backend`](backend) is a separate service. It is not required
 to start the client against the configured hosted API. If backend work is
 needed, copy `backend/.env.example` to `backend/.env`, provide a local MongoDB,
