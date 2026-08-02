@@ -94,3 +94,7 @@ frontend/node_modules/.cache/default-development/11.pack
 .env
 .env.*
 *.env
+
+# Keep secret-free setup templates in version control.
+!frontend/.env.example
+!backend/.env.example

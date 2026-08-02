@@ -1,0 +1,182 @@
+name: Local EAS Builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        description: Platform to build
+        required: true
+        default: android
+        options:
+          - android
+          - ios
+          - all
+      buildType:
+        type: choice
+        description: Artifact type
+        required: true
+        default: development
+        options:
+          - development
+          - android-apk
+          - android-aab
+          - ios-production
+          - all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-eas-${{ github.ref }}-${{ inputs.platform }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  validate-request:
+    name: Validate build selection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject incompatible platform and artifact selections
+        shell: bash
+        run: |
+          case "${{ inputs.platform }}:${{ inputs.buildType }}" in
+            android:development|android:android-apk|android:android-aab|android:all)
+              ;;
+            ios:development|ios:ios-production|ios:all)
+              ;;
+            all:development|all:all)
+              ;;
+            *)
+              echo "::error::${{ inputs.buildType }} is not valid for platform ${{ inputs.platform }}."
+              exit 1
+              ;;
+          esac
+
+  android:
+    name: Build Android locally
+    needs: validate-request
+    if: ${{ inputs.platform == 'android' || inputs.platform == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: temurin
+
+      - name: Install dependencies
+        run: corepack yarn install --frozen-lockfile
+
+      - name: Require Expo access token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN2 }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN2 is required to access Expo-managed signing credentials."
+            exit 1
+          fi
+
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN2 }}
+
+      - name: Prepare artifact directory
+        run: mkdir -p build
+
+      - name: Build development APK
+        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        run: eas build --platform android --profile development --local --non-interactive --output ./build/book-scrubby-dev.apk
+
+      - name: Build production APK
+        if: ${{ inputs.buildType == 'android-apk' || inputs.buildType == 'all' }}
+        run: eas build --platform android --profile production-apk --local --non-interactive --output ./build/book-scrubby-prod.apk
+
+      - name: Build production AAB
+        if: ${{ inputs.buildType == 'android-aab' || inputs.buildType == 'all' }}
+        run: eas build --platform android --profile production --local --non-interactive --output ./build/book-scrubby-prod.aab
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-scrubby-android-${{ inputs.buildType }}-${{ github.run_id }}
+          path: |
+            frontend/build/*.apk
+            frontend/build/*.aab
+          if-no-files-found: error
+          retention-days: 7
+
+  ios:
+    name: Build iOS locally
+    needs: validate-request
+    if: ${{ inputs.platform == 'ios' || inputs.platform == 'all' }}
+    runs-on: macos-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install dependencies
+        run: corepack yarn install --frozen-lockfile
+
+      - name: Require Expo access token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN2 }}
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::EXPO_TOKEN2 is required to access Expo-managed signing credentials."
+            exit 1
+          fi
+
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN2 }}
+
+      - name: Prepare artifact directory
+        run: mkdir -p build
+
+      - name: Build development IPA
+        if: ${{ inputs.buildType == 'development' || inputs.buildType == 'all' }}
+        run: eas build --platform ios --profile development --local --non-interactive --output ./build/book-scrubby-dev.ipa
+
+      - name: Build production IPA
+        if: ${{ inputs.buildType == 'ios-production' || inputs.buildType == 'all' }}
+        run: eas build --platform ios --profile production --local --non-interactive --output ./build/book-scrubby-prod.ipa
+
+      - name: Upload iOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: book-scrubby-ios-${{ inputs.buildType }}-${{ github.run_id }}
+          path: frontend/build/*.ipa
+          if-no-files-found: error
+          retention-days: 7

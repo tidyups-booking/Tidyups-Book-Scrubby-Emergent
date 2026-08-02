@@ -1,24 +1,25 @@
 {
   "expo": {
-    "name": "Tidyups Cleaning",
-    "slug": "tidyups-cleaning",
+    "owner": "bookscrubby",
+    "name": "Book Scrubby",
+    "slug": "book-scrubby",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "tidyups",
+    "scheme": "bookscrubby",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0A0611",
     "primaryColor": "#8B2FC9",
-    "privacy": "public",
-    "githubUrl": "https://bookscrubby.com",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.tidyups.cleaning",
+      "bundleIdentifier": "com.bookscrubby",
       "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
       },
-      "associatedDomains": ["applinks:bookscrubby.com"],
+      "associatedDomains": [
+        "applinks:bookscrubby.com"
+      ],
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Tidyups shares your live position with dispatch only while you tap 'Start Sharing Location' as a cleaner heading to a job. Sharing stops the moment you tap Stop.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Tidyups keeps sharing your live position with dispatch even when the app is in the background so your team can see you all the way to the customer. Sharing always stops the moment you tap Stop.",
@@ -30,13 +31,14 @@
       }
     },
     "android": {
-      "package": "com.tidyups.cleaning",
+      "package": "com.bookscrubby",
       "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#0A0611",
         "foregroundImage": "./assets/images/icon.png"
       },
       "permissions": [
+<<<<<<< HEAD
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
@@ -45,13 +47,29 @@
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "READ_EXTERNAL_STORAGE"
+=======
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+>>>>>>> origin/main
       ],
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "https", "host": "bookscrubby.com" }],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "data": [
+            {
+              "scheme": "https",
+              "host": "bookscrubby.com"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -60,12 +78,14 @@
       "favicon": "./assets/images/favicon.png"
     },
     "extra": {
-      "eas": {
-        "projectId": "tidyups-cleaning"
-      },
       "privacyPolicyUrl": "https://bookscrubby.com/privacy",
       "termsOfServiceUrl": "https://bookscrubby.com/terms",
-      "supportUrl": "https://bookscrubby.com/contact"
+      "supportUrl": "https://bookscrubby.com/contact",
+      "dataDeletionUrl": "https://bookscrubby.com/removerdata",
+      "router": {},
+      "eas": {
+        "projectId": "0c221866-29b4-446e-8e1e-21d728074c5f"
+      }
     },
     "plugins": [
       "expo-router",

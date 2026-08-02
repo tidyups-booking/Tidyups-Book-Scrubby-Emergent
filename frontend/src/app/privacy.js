@@ -150,7 +150,7 @@ const SECTIONS = [
       {
         type: 'p',
         text:
-          'You can ask us to (a) tell you what personal information we hold about you, (b) correct any inaccuracies, or (c) delete your data. Email [hello@tidyupscleaning.com](mailto:hello@tidyupscleaning.com) with the subject line **"Privacy request"** and we will respond within 30 days.',
+          'You can ask us to (a) tell you what personal information we hold about you, (b) correct any inaccuracies, or (c) delete your data. Visit [Delete Your Data](https://bookscrubby.com/removerdata) or email [hello@tidyupscleaning.com](mailto:hello@tidyupscleaning.com) with the subject line **"Privacy request"** and we will respond within 30 days.',
       },
       {
         type: 'p',
@@ -197,7 +197,7 @@ export default function PrivacyScreen() {
       testID="privacy-page"
       kicker="Legal"
       title="Privacy Policy"
-      updated="February 24, 2026"
+      updated="July 26, 2026"
       intro="This policy explains what personal information Tidyups Cleaning Inc. collects when you use bookscrubby.com or the Tidyups mobile app, and how we use, store, and protect it."
       sections={SECTIONS}
     />

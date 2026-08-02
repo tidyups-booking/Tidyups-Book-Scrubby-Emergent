@@ -44,6 +44,7 @@ export default function RootLayout() {
           <Stack.Screen name="admin" options={MODAL_OPTIONS} />
           <Stack.Screen name="cleaner" options={MODAL_OPTIONS} />
           <Stack.Screen name="privacy" />
+          <Stack.Screen name="removerdata" />
           <Stack.Screen name="terms" />
         </Stack>
       </View>

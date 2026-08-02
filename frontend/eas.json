@@ -14,9 +14,16 @@
         "buildType": "apk"
       }
     },
+    "production-apk": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "production": {
       "autoIncrement": true,
       "ios": {
+        "distribution": "store",
         "resourceClass": "m-medium"
       },
       "android": {
@@ -27,12 +34,12 @@
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "6792950350",
-        "appleId": "REPLACE_WITH_APPLE_ID_EMAIL",
-        "appleTeamId": "REPLACE_WITH_APPLE_TEAM_ID",
-        "bundleIdentifier": "com.tidyups.cleaning",
-        "companyName": "Tidyups Cleaning Inc.",
-        "language": "en-US"
+        "appleId": "support@bookscrubby.com",
+        "ascAppId": "6794021819",
+        "ascApiKeyId": "676XW385F6",
+        "ascApiKeyIssuerId": "207e2f58-9fab-4c4a-a87c-d292a1c2aaaa",
+        "ascApiKeyPath": "./AuthKey_676XW385F6.p8",
+        "appleTeamId": "577Q74XH78"
       },
       "android": {
         "serviceAccountKeyPath": "./google-play-service-account.json",

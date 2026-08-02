@@ -98,6 +98,10 @@ export default function ContactScreen() {
           <TouchableOpacity onPress={() => router.push('/terms')} testID="footer-terms-link">
             <Text style={styles.legalLink}>Terms of Service</Text>
           </TouchableOpacity>
+          <Text style={styles.legalSep}>·</Text>
+          <TouchableOpacity onPress={() => router.push('/removerdata')} testID="footer-remove-data-link">
+            <Text style={styles.legalLink}>Delete My Data</Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.copyright}>© {new Date().getFullYear()} Tidyups Cleaning Inc.</Text>
       </ScrollView>
@@ -141,6 +145,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 10,
     marginTop: 30,
     paddingTop: 20,
