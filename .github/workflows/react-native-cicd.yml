@@ -154,3 +154,35 @@ jobs:
             frontend/build/*.ipa
           if-no-files-found: error
           retention-days: 7
+
+      - name: Set up rclone
+        if: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN != '' }}
+        uses: AnimMouse/setup-rclone@v1
+        with:
+          version: latest
+
+      - name: Back up build to Google Drive
+        if: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN != '' }}
+        continue-on-error: true
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: ${{ secrets.RCLONE_CONFIG_GDRIVE_TYPE }}
+          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_CONFIG_GDRIVE_TOKEN }}
+          # Folder: https://drive.google.com/drive/folders/12oQKDzcP_wWVFG51LgUOL9_AojFct9cP
+          RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: "12oQKDzcP_wWVFG51LgUOL9_AojFct9cP"
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [gdrive]
+          type = ${RCLONE_CONFIG_GDRIVE_TYPE}
+          token = ${RCLONE_CONFIG_GDRIVE_TOKEN}
+          root_folder_id = ${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID}
+          EOF
+          chmod 600 ~/.config/rclone/rclone.conf
+
+          VERSION=$(node -p "require('./app.json').expo.version")
+          FOLDER="Book Scrubby Builds/${VERSION}-${{ inputs.buildType }}-${{ github.run_id }}-${{ matrix.platform }}"
+
+          rclone mkdir "gdrive:${FOLDER}"
+          rclone copy ./build "gdrive:${FOLDER}" \
+            --include "*.apk" --include "*.aab" --include "*.ipa" -v
+          echo "Uploaded to Google Drive: ${FOLDER}"
