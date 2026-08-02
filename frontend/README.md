@@ -43,16 +43,24 @@ There is no frontend unit-test suite yet. `test` is the current static quality
 gate (ESLint plus TypeScript), while `validate` also performs a local static web
 export.
 
-## Credentialed or remote workflows
+## Native builds and costs
 
-Do not use `eas build`, `eas update`, `eas submit`, or trigger the publishing
-options in `.github/workflows/react-native-cicd.yml` for routine validation.
-Those paths can require Expo, Apple, Google Play, notification, or Google Drive
-credentials and can consume hosted runner time, service quota, or store access.
+For an installable APK, AAB, or IPA, manually run the **Local EAS Builds**
+workflow in GitHub Actions (`.github/workflows/react-native-cicd.yml`). Choose a
+platform and compatible artifact type; the default is the lower-cost Android
+development build. The workflow is manual-only, cancels an older duplicate run,
+and every native build command includes `eas build --local`.
 
-The workflow expects repository secrets such as `EXPO_TOKEN2`,
-`ASC_API_KEY_P8_BASE64`, `GOOGLE_PLAY_SERVICE_ACCOUNT`, `SLACK_WEBHOOK`,
-`DISCORD_WEBHOOK`, `RCLONE_CONFIG_GDRIVE_TYPE`, and
-`RCLONE_CONFIG_GDRIVE_TOKEN`. Store submission also depends on the local
-credential file names configured in `eas.json`; neither credential file belongs
-in source control.
+Local EAS compilation avoids EAS cloud-build charges. It still consumes GitHub
+Actions runner minutes, and `macos-latest` iOS minutes are especially expensive
+once the repository's included quota is exhausted. Selecting `all` intentionally
+runs multiple builds and should be used sparingly.
+
+The workflow requires `EXPO_TOKEN2` to access the Expo project and
+Expo-managed signing credentials. It only builds and uploads short-lived GitHub
+artifacts; it does not run `eas update`, `eas submit`, deploy, notify external
+services, or publish to a store.
+
+Store submission is a separate, deliberate release task documented in
+`STORE_SUBMISSION_GUIDE.md`. Never place Apple, Google, or Expo credentials in
+source control.

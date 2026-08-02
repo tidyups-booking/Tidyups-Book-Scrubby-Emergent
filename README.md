@@ -20,6 +20,10 @@ See [`frontend/README.md`](frontend/README.md) for environment setup, local
 validation commands, and the distinction between local Expo checks and
 credentialed EAS/store workflows.
 
+For installable Android or iOS artifacts, manually run the **Local EAS Builds**
+GitHub Actions workflow. It is the repository's only recommended native build
+path and uses `eas build --local`; it never submits or deploys an app.
+
 The Python API in [`backend`](backend) is a separate service. It is not required
 to start the client against the configured hosted API. If backend work is
 needed, copy `backend/.env.example` to `backend/.env`, provide a local MongoDB,

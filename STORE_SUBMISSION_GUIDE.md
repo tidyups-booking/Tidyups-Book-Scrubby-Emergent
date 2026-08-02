@@ -1,50 +1,34 @@
 # Tidyups Cleaning — App Store & Google Play Submission Guide
 
-Everything in the repo is already configured (app.json bundle IDs, icons, splash, eas.json build
-profiles, location & notification permission strings). Follow these steps from your own computer —
-the store builds run on Expo's EAS cloud, so you don't need Xcode or Android Studio.
+Everything in the repo is already configured (app.json bundle IDs, icons,
+splash, eas.json build profiles, location, and notification permission strings).
+Native artifacts are built manually by the repository's **Local EAS Builds**
+GitHub Actions workflow. It uses `eas build --local`, not EAS cloud builds.
 
 ## 0. One-time setup (10 min)
 1. Create a free Expo account at https://expo.dev/signup (if you don't have one).
-2. Install Node.js 20+ (https://nodejs.org), then in a terminal:
-   ```
-   npm install -g eas-cli
-   ```
-3. Download this project's code (Emergent → "Save to GitHub", then clone; or use the code download option).
-4. In the project: `cd frontend && yarn install --ignore-engines`
-5. Log in: `eas login`
-6. Link the project (creates the EAS project id automatically):
-   ```
-   eas init
-   ```
+2. Configure the repository secret `EXPO_TOKEN2` and the Expo-managed Android
+   and iOS signing credentials for the existing project ID in `frontend/app.json`.
+3. In GitHub Actions, select **Local EAS Builds** and use **Run workflow**.
+4. Choose the required platform and production artifact. Building avoids EAS
+   cloud-build charges, but GitHub-hosted runner minutes can incur cost after
+   quota; macOS iOS minutes are especially expensive.
 
 ## 1. Android — Google Play ($25 one-time account)
-1. Build the production app bundle:
-   ```
-   eas build --platform android --profile production
-   ```
-   (First run: let EAS generate and manage the keystore — press Enter to accept.)
-2. While it builds (~15 min), go to https://play.google.com/console → "Create app":
+1. Run **Local EAS Builds** with platform `android` and artifact
+   `android-aab`, then download the `.aab` workflow artifact.
+2. Go to https://play.google.com/console → "Create app":
    - Name: Tidyups Cleaning · Default language: English (CA) · App type: App · Free.
 3. Complete the "Set up your app" checklist (content rating, data safety — see notes below, target audience 18+).
-4. Download the `.aab` from https://expo.dev (your build page) and upload it under
-   Production → Create new release, or submit straight from the terminal:
-   ```
-   eas submit --platform android --latest
-   ```
-   (First time you'll need a Google Service Account JSON — EAS prints a step-by-step link.)
+4. Upload the downloaded `.aab` under Production → Create new release.
+   Submission is intentionally not automated by this repository.
 
 ## 2. iOS — App Store ($99/yr Apple Developer account)
-1. Build:
-   ```
-   eas build --platform ios --profile production
-   ```
-   Sign in with your Apple Developer account when prompted — EAS creates certificates and the
-   provisioning profile for `com.tidyups.cleaning` automatically.
-2. Submit the build to App Store Connect:
-   ```
-   eas submit --platform ios --latest
-   ```
+1. Run **Local EAS Builds** with platform `ios` and artifact `ios-production`,
+   then download the `.ipa` workflow artifact.
+2. Upload the `.ipa` to App Store Connect with Apple's Transporter or another
+   explicitly authorized release tool. Submission is intentionally not
+   automated by this repository.
 3. In https://appstoreconnect.apple.com → My Apps → Tidyups Cleaning:
    - Fill in the listing (description, keywords, support URL, screenshots).
    - Screenshots: run the app, take 6.5" iPhone screenshots (1290×2796). The dark theme looks great here.
@@ -73,5 +57,5 @@ Privacy policy: host `PRIVACY_POLICY.md` (in the repo root) on your website, e.g
 
 ## 5. After approval
 - Push notifications & background location for cleaners work best in these native builds.
-- To ship an update later: bump nothing (autoIncrement handles versions), just re-run
-  `eas build … && eas submit …`.
+- To ship an update later, run the local GitHub Actions build again, review its
+  artifact, and perform the store upload as a separate release action.
