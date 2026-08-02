@@ -138,7 +138,7 @@ jobs:
         run: mkdir -p build
 
       - name: Build development APK
-        if: ${{ matrix.platform == 'android' && (github.event.inputs.buildType == 'development' || github.event.inputs.buildType == 'all') }}
+        if: ${{ matrix.platform == 'android' && (github.event_name == 'push' || github.event.inputs.buildType == 'development' || github.event.inputs.buildType == 'all') }}
         run: eas build --platform android --profile development --local --non-interactive --output ./build/book-scrubby-dev.apk
 
       - name: Build production APK
