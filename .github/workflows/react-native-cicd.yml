@@ -68,8 +68,8 @@ jobs:
         id: selection
         shell: bash
         env:
-          PLATFORM: ${{ inputs.platform }}
-          BUILD_TYPE: ${{ inputs.buildType }}
+          PLATFORM: ${{ inputs.platform || 'android' }}
+          BUILD_TYPE: ${{ inputs.buildType || 'development' }}
         run: |
           case "$PLATFORM:$BUILD_TYPE" in
             android:development|android:android-apk|android:android-aab|android:all)
